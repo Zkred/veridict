@@ -1,0 +1,38 @@
+name: Anonymous Review Check
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+# Block merge unless N valid ZK proofs are registered against this PR's HEAD sha.
+# Add this check as a required status check on the protected branch.
+jobs:
+  zk-review-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Query review backend
+        id: query
+        env:
+          BACKEND_URL: ${{ secrets.REVIEW_BACKEND_URL }}
+          OWNER: ${{ github.event.repository.owner.login }}
+          REPO: ${{ github.event.repository.name }}
+          PR: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          url="${BACKEND_URL}/pr/${OWNER}/${REPO}/${PR}/${SHA}/approvals"
+          echo "Polling $url"
+          resp=$(curl -fsS "$url")
+          echo "$resp"
+          echo "resp=$resp" >> "$GITHUB_OUTPUT"
+
+      - name: Enforce threshold
+        run: |
+          pass=$(jq -r .pass <<< '${{ steps.query.outputs.resp }}')
+          count=$(jq -r .valid_proofs <<< '${{ steps.query.outputs.resp }}')
+          required=$(jq -r .required <<< '${{ steps.query.outputs.resp }}')
+          if [ "$pass" != "true" ]; then
+            echo "::error::Only $count / $required anonymous reviewers approved"
+            exit 1
+          fi
+          echo "OK: $count / $required anonymous reviewers approved"
