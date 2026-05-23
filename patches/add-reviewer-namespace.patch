@@ -1,0 +1,46 @@
+From: hackathon-team
+Subject: [PATCH] Register org.example.reviewer as a supported namespace
+
+Longfellow's MDOC parser only finds attributes whose namespace appears in
+the hardcoded kSupportedNamespaces array. This patch adds the demo
+namespace used by our anonymous code review system.
+
+Apply with:
+  cd longfellow-zk
+  git apply ../secure-program-synthesis-hackathon/patches/add-reviewer-namespace.patch
+
+Then rebuild:
+  cmake --build build -j16
+
+---
+ lib/circuits/mdoc/mdoc_attribute_ids.h | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/lib/circuits/mdoc/mdoc_attribute_ids.h b/lib/circuits/mdoc/mdoc_attribute_ids.h
+--- a/lib/circuits/mdoc/mdoc_attribute_ids.h
++++ b/lib/circuits/mdoc/mdoc_attribute_ids.h
+@@ -29,11 +29,12 @@ constexpr const char* kISO23220Namespace = "org.iso.23220.1";
+ constexpr const char* kISO23220PhotoIDNamespace = "org.iso.23220.photoID.1";
+ constexpr const char* kISO23220DTCNamespace = "org.iso.23220.dtc.1";
+ constexpr const char* kAadhaarNamespace = "in.gov.uidai.aadhaar.1";
++constexpr const char* kReviewerNamespace = "org.example.reviewer";
+
+ constexpr const char* kSupportedNamespaces[] = {
+     kMDLNamespace,         kAAMVANamespace,    kEUAVNamespace,
+     kEUDIPIDNamespace,     kISO23220Namespace, kISO23220PhotoIDNamespace,
+-    kISO23220DTCNamespace, kAadhaarNamespace};
++    kISO23220DTCNamespace, kAadhaarNamespace,  kReviewerNamespace};
+
+ constexpr const char* kIDPassDocType = "com.google.wallet.idcard.1";
+ constexpr const char* kMDLDocType = "org.iso.18013.5.1.mDL";
+@@ -240,6 +241,10 @@ constexpr MdocAttribute kMdocAttributes[] = {
+     {"masked_uid", kAadhaarNamespace},
+     {"aadhaar_type", kAadhaarNamespace},
+     {"expires_on", kAadhaarNamespace},
++
++    // Anonymous code review credentials
++    {"role", kReviewerNamespace},
++    {"org", kReviewerNamespace},
+ };
+
+ }  // namespace proofs

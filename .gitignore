@@ -1,0 +1,36 @@
+# Secrets
+.env
+.env.local
+*.pem
+.secrets/
+issuer_key.pem
+issuer/issuer_key.pem
+
+# macOS
+.DS_Store
+
+# Runtime
+.validate/
+.venv/
+
+# Build
+prover/build/
+longfellow-zk/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Local databases (SQLite)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Playwright + design iteration artifacts
+.playwright-mcp/
+homepage-*.png
+review-*.png
+inspo-*.png
+veridict-rename.png
