@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Veridict — Pipeline</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: #ffffff;
+    color: #24292f;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+    overflow: hidden;
+  }
+
+  h1 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: #24292f;
+    margin-bottom: 0.25rem;
+    text-align: center;
+    letter-spacing: -0.02em;
+  }
+  .tagline {
+    font-size: 0.9rem;
+    color: #57606a;
+    text-align: center;
+    margin-bottom: 3rem;
+  }
+
+  /* ── Pipeline ── */
+  .pipeline {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    position: relative;
+  }
+
+  .node {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.6rem;
+    opacity: 0.25;
+    transition: opacity 0.5s ease;
+    position: relative;
+  }
+  .node.active { opacity: 1; }
+  .node.done   { opacity: 0.7; }
+
+  .icon-wrap {
+    width: 64px; height: 64px;
+    border-radius: 14px;
+    display: flex; align-items: center; justify-content: center;
+    border: 2px solid transparent;
+    transition: border-color 0.4s, box-shadow 0.4s, background 0.4s;
+    position: relative;
+    background: #f3f4f6;
+    color: #d0d4d8;
+  }
+  .node.active .icon-wrap {
+    border-color: var(--color);
+    box-shadow: 0 0 20px var(--glow);
+    background: var(--bg);
+    color: var(--color);
+  }
+  .node.done .icon-wrap {
+    border-color: #d0d4d8;
+    color: #9ca3af;
+  }
+
+  /* SVG icon sizing & glow */
+  .icon-wrap svg {
+    width: 30px; height: 30px;
+    transition: filter 0.4s;
+    flex-shrink: 0;
+  }
+  .node.active .icon-wrap svg {
+    filter: drop-shadow(0 0 5px var(--glow));
+  }
+
+  /* check badge */
+  .icon-wrap .check {
+    position: absolute;
+    bottom: -6px; right: -6px;
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    background: #1a7f37;
+    border: 2px solid #ffffff;
+    display: flex; align-items: center; justify-content: center;
+    opacity: 0;
+    transform: scale(0);
+    transition: opacity 0.3s, transform 0.3s;
+  }
+  .check svg { width: 10px; height: 10px; color: #fff; }
+  .node.done .icon-wrap .check {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  .node-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: #57606a;
+    text-align: center;
+    max-width: 70px;
+    line-height: 1.3;
+    transition: color 0.4s;
+  }
+  .node.active .node-label { color: #24292f; }
+
+  .node-sub {
+    font-size: 0.62rem;
+    color: #57606a;
+    text-align: center;
+    max-width: 75px;
+    line-height: 1.3;
+  }
+
+  /* connector */
+  .connector {
+    width: 52px;
+    height: 2px;
+    background: #e1e4e8;
+    position: relative;
+    margin-bottom: 28px;
+    flex-shrink: 0;
+  }
+  .connector-fill {
+    position: absolute;
+    left: 0; top: 0;
+    width: 0%; height: 100%;
+    background: linear-gradient(90deg, #388bfd, #58a6ff);
+    transition: width 0.6s ease;
+    border-radius: 1px;
+  }
+  .connector.active .connector-fill { width: 100%; }
+
+  /* particle */
+  .particle {
+    position: absolute;
+    top: 50%; transform: translateY(-50%);
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: #58a6ff;
+    box-shadow: 0 0 8px #58a6ff;
+    opacity: 0;
+    left: 0%;
+  }
+  @keyframes travel {
+    0%   { left: 0%;  opacity: 0; }
+    10%  { opacity: 1; }
+    90%  { opacity: 1; }
+    100% { left: 100%; opacity: 0; }
+  }
+
+  /* detail panel */
+  .details {
+    margin-top: 2.5rem;
+    background: #f6f8fa;
+    border: 1px solid #e1e4e8;
+    border-radius: 10px;
+    padding: 1.1rem 1.4rem;
+    min-height: 72px;
+    width: 100%;
+    max-width: 700px;
+    position: relative;
+    overflow: hidden;
+  }
+  .detail-item {
+    display: none;
+    animation: fadeSlide 0.4s ease;
+  }
+  .detail-item.visible { display: flex; gap: 0.85rem; align-items: flex-start; }
+  @keyframes fadeSlide {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .detail-icon {
+    flex-shrink: 0;
+    margin-top: 0.15rem;
+    width: 28px; height: 28px;
+    border-radius: 7px;
+    background: var(--di-bg, rgba(56,139,253,0.1));
+    display: flex; align-items: center; justify-content: center;
+    color: var(--di-color, #58a6ff);
+  }
+  .detail-icon svg { width: 16px; height: 16px; }
+  .detail-title {
+    font-size: 0.875rem; font-weight: 600; color: #24292f;
+    margin-bottom: 0.2rem;
+  }
+  .detail-desc { font-size: 0.8rem; color: #57606a; line-height: 1.5; }
+  .chip {
+    display: inline-block;
+    font-size: 0.7rem; font-weight: 600;
+    padding: 0.1rem 0.45rem;
+    border-radius: 2em;
+    margin-right: 0.3rem;
+    font-family: ui-monospace, monospace;
+  }
+  .chip.green  { background: rgba(56,139,82,0.15);  color: #238636; }
+  .chip.blue   { background: rgba(56,139,253,0.15); color: #0969da; }
+  .chip.purple { background: rgba(188,140,255,0.15); color: #6f42c1; }
+  .chip.orange { background: rgba(210,153,34,0.15);  color: #bf8700; }
+
+  /* progress dots */
+  .dots {
+    display: flex; gap: 0.4rem; justify-content: center;
+    margin-top: 1.8rem;
+  }
+  .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: #e1e4e8;
+    transition: background 0.3s, transform 0.3s;
+  }
+  .dot.active { background: #388bfd; transform: scale(1.3); }
+  .dot.done   { background: #1a7f37; }
+
+  /* replay button */
+  .replay {
+    margin-top: 1.5rem;
+    background: #f6f8fa;
+    border: 1px solid #d0d4d8;
+    color: #57606a;
+    font: inherit;
+    font-size: 0.8rem;
+    padding: 0.4rem 1rem;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: color 0.2s, border-color 0.2s, background 0.2s;
+  }
+  .replay:hover { color: #24292f; border-color: #388bfd; background: #ffffff; }
+
+  /* brand */
+  .brand {
+    position: fixed; bottom: 1.2rem; right: 1.5rem;
+    font-size: 0.72rem; color: #d0d4d8;
+    letter-spacing: 0.04em;
+  }
+</style>
+</head>
+<body>
+
+<h1>Veridict</h1>
+<p class="tagline">AI synthesis · Formal verification · ZK-attested human review · GitHub merge gate</p>
+
+<div class="pipeline" id="pipeline">
+
+  <!-- 0: Spec -->
+  <div class="node" id="n0" style="--color:#0969da;--glow:rgba(9,105,218,0.3);--bg:rgba(9,105,218,0.08)">
+    <div class="icon-wrap">
+      <!-- document-text -->
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/>
+      </svg>
+      <span class="check">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="20 6 9 17 4 12"/>
+        </svg>
+      </span>
+    </div>
+    <div class="node-label">Specification</div>
+    <div class="node-sub">Natural language</div>
+  </div>
+
+  <div class="connector" id="c0"><div class="connector-fill"></div><div class="particle" id="p0"></div></div>
+
+  <!-- 1: Claude -->
+  <div class="node" id="n1" style="--color:#8250df;--glow:rgba(130,80,223,0.3);--bg:rgba(130,80,223,0.08)">
+    <div class="icon-wrap">
+      <!-- sparkles (AI) -->
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/>
+        <path d="M18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z"/>
+      </svg>
+      <span class="check">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="20 6 9 17 4 12"/>
+        </svg>
+      </span>
+    </div>
+    <div class="node-label">Claude API</div>
+    <div class="node-sub">Synthesis</div>
+  </div>
+
+  <div class="connector" id="c1"><div class="connector-fill"></div><div class="particle" id="p1"></div></div>
+
+  <!-- 2: Formal check -->
+  <div class="node" id="n2" style="--color:#238636;--glow:rgba(35,134,54,0.3);--bg:rgba(35,134,54,0.08)">
+    <div class="icon-wrap">
+      <!-- shield-check -->
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/>
+      </svg>
+      <span class="check">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="20 6 9 17 4 12"/>
+        </svg>
+      </span>
+    </div>
+    <div class="node-label">Formal Check</div>
+    <div class="node-sub">mypy·pytest·z3</div>
+  </div>
+
+  <div class="connector" id="c2"><div class="connector-fill"></div><div class="particle" id="p2"></div></div>
+
+  <!-- 3: ZK proof -->
+  <div class="node" id="n3" style="--color:#bf8700;--glow:rgba(191,135,0,0.3);--bg:rgba(191,135,0,0.08)">
+    <div class="icon-wrap">
+      <!-- lock-closed -->
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"/>
+      </svg>
+      <span class="check">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="20 6 9 17 4 12"/>
+        </svg>
+      </span>
+    </div>
+    <div class="node-label">ZK Proof</div>
+    <div class="node-sub">Longfellow</div>
+  </div>
+
+  <div class="connector" id="c3"><div class="connector-fill"></div><div class="particle" id="p3"></div></div>
+
+  <!-- 4: Anonymous review -->
+  <div class="node" id="n4" style="--color:#d1360f;--glow:rgba(209,54,15,0.3);--bg:rgba(209,54,15,0.08)">
+    <div class="icon-wrap">
+      <!-- eye-slash (identity hidden) -->
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88"/>
+      </svg>
+      <span class="check">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="20 6 9 17 4 12"/>
+        </svg>
+      </span>
+    </div>
+    <div class="node-label">Anonymous Review</div>
+    <div class="node-sub">Identity hidden</div>
+  </div>
+
+  <div class="connector" id="c4"><div class="connector-fill"></div><div class="particle" id="p4"></div></div>
+
+  <!-- 5: Merge gate -->
+  <div class="node" id="n5" style="--color:#238636;--glow:rgba(35,134,54,0.4);--bg:rgba(35,134,54,0.1)">
+    <div class="icon-wrap">
+      <!-- check-badge -->
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 12.75L11.25 15 15 9.75M21 12c0 1.268-.63 2.39-1.593 3.068a3.745 3.745 0 01-.723 3.065 3.745 3.745 0 01-3.065.723 3.745 3.745 0 01-3.068 1.593 3.745 3.745 0 01-3.068-1.593 3.745 3.745 0 01-3.065-.723 3.745 3.745 0 01-.723-3.065A3.745 3.745 0 013 12c0-1.268.63-2.39 1.593-3.068a3.745 3.745 0 01.723-3.065 3.745 3.745 0 013.065-.723A3.745 3.745 0 0112 3c1.268 0 2.39.63 3.068 1.593a3.745 3.745 0 013.065.723 3.745 3.745 0 01.723 3.065A3.745 3.745 0 0121 12z"/>
+      </svg>
+      <span class="check">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="20 6 9 17 4 12"/>
+        </svg>
+      </span>
+    </div>
+    <div class="node-label">Merge Gate</div>
+    <div class="node-sub">GitHub branch protection</div>
+  </div>
+
+</div>
+
+<!-- Detail panel -->
+<div class="details" id="details">
+  <div class="detail-item" id="d0">
+    <div class="detail-icon" style="--di-bg:rgba(9,105,218,0.1);--di-color:#0969da">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/>
+      </svg>
+    </div>
+    <div>
+      <div class="detail-title">Natural-language specification</div>
+      <div class="detail-desc">Engineer writes what the code should do — class names, method signatures, invariants. No code yet.</div>
+    </div>
+  </div>
+  <div class="detail-item" id="d1">
+    <div class="detail-icon" style="--di-bg:rgba(130,80,223,0.1);--di-color:#8250df">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/>
+        <path d="M18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z"/>
+      </svg>
+    </div>
+    <div>
+      <div class="detail-title">Claude synthesizes implementation + tests + Z3 spec</div>
+      <div class="detail-desc">Three files generated: <span class="chip blue">module.py</span><span class="chip blue">test_module.py</span><span class="chip blue">z3_module.py</span>. GitHub App opens a PR automatically.</div>
+    </div>
+  </div>
+  <div class="detail-item" id="d2">
+    <div class="detail-icon" style="--di-bg:rgba(35,134,54,0.1);--di-color:#238636">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/>
+      </svg>
+    </div>
+    <div>
+      <div class="detail-title">Formal verification gate — all three must pass</div>
+      <div class="detail-desc"><span class="chip green">mypy ✓</span> type safety &nbsp;<span class="chip green">pytest ✓</span> behavioural correctness &nbsp;<span class="chip green">z3 ✓</span> invariants proved for all inputs. Hard gate — no credential issued if any fails.</div>
+    </div>
+  </div>
+  <div class="detail-item" id="d3">
+    <div class="detail-icon" style="--di-bg:rgba(191,135,0,0.1);--di-color:#bf8700">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"/>
+      </svg>
+    </div>
+    <div>
+      <div class="detail-title">Longfellow ZK proof — ~360 KB, ~10 s</div>
+      <div class="detail-desc">ISO 18013-5 MDOC credential bound to <span class="chip orange">commit SHA</span>. Proof reveals only <span class="chip orange">role = maintainer</span>. Replay across PRs is cryptographically impossible.</div>
+    </div>
+  </div>
+  <div class="detail-item" id="d4">
+    <div class="detail-icon" style="--di-bg:rgba(209,54,15,0.1);--di-color:#d1360f">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88"/>
+      </svg>
+    </div>
+    <div>
+      <div class="detail-title">Anonymous approval — identity never disclosed</div>
+      <div class="detail-desc">Bot posts comment with <span class="chip purple">stable pseudonym</span> + reputation chips <span class="chip green">mypy ✓ pytest ✓ z3 ✓</span>. PR author sees proof of qualification, not identity.</div>
+    </div>
+  </div>
+  <div class="detail-item" id="d5">
+    <div class="detail-icon" style="--di-bg:rgba(35,134,54,0.1);--di-color:#238636">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 12.75L11.25 15 15 9.75M21 12c0 1.268-.63 2.39-1.593 3.068a3.745 3.745 0 01-.723 3.065 3.745 3.745 0 01-3.065.723 3.745 3.745 0 01-3.068 1.593 3.745 3.745 0 01-3.068-1.593 3.745 3.745 0 01-3.065-.723 3.745 3.745 0 01-.723-3.065A3.745 3.745 0 013 12c0-1.268.63-2.39 1.593-3.068a3.745 3.745 0 01.723-3.065 3.745 3.745 0 013.065-.723A3.745 3.745 0 0112 3c1.268 0 2.39.63 3.068 1.593a3.745 3.745 0 013.065.723 3.745 3.745 0 01.723 3.065A3.745 3.745 0 0121 12z"/>
+      </svg>
+    </div>
+    <div>
+      <div class="detail-title">Merge gate green — N anonymous approvals reached</div>
+      <div class="detail-desc">Backend pushes <span class="chip green">zk-review-gate: success</span> to GitHub. Branch protection enforces the gate. No reviewer had repo write access.</div>
+    </div>
+  </div>
+</div>
+
+<!-- Progress dots -->
+<div class="dots" id="dots">
+  <div class="dot" id="dot0"></div>
+  <div class="dot" id="dot1"></div>
+  <div class="dot" id="dot2"></div>
+  <div class="dot" id="dot3"></div>
+  <div class="dot" id="dot4"></div>
+  <div class="dot" id="dot5"></div>
+</div>
+
+<button class="replay" id="replay-btn" style="display:none" onclick="startAnimation()">↺ Replay</button>
+
+<div class="brand">Veridict · Longfellow ZK · Claude API</div>
+
+<script>
+  const STEPS = 6;
+  const STEP_MS = 1800;
+  let step = -1;
+  let timers = [];
+
+  function clear() {
+    timers.forEach(clearTimeout);
+    timers = [];
+    for (let i = 0; i < STEPS; i++) {
+      document.getElementById('n' + i).className = 'node';
+      document.getElementById('d' + i).className = 'detail-item';
+      document.getElementById('dot' + i).className = 'dot';
+      if (i < STEPS - 1) {
+        document.getElementById('c' + i).classList.remove('active');
+        document.getElementById('c' + i).querySelector('.connector-fill').style.width = '0%';
+        const p = document.getElementById('p' + i);
+        p.style.animation = 'none';
+      }
+    }
+    document.getElementById('replay-btn').style.display = 'none';
+  }
+
+  function activateNode(i) {
+    const node = document.getElementById('n' + i);
+    node.classList.remove('done');
+    node.classList.add('active');
+    document.getElementById('d' + i).classList.add('visible');
+    document.getElementById('dot' + i).classList.add('active');
+  }
+
+  function doneNode(i) {
+    const node = document.getElementById('n' + i);
+    node.classList.remove('active');
+    node.classList.add('done');
+    document.getElementById('d' + i).classList.remove('visible');
+    document.getElementById('dot' + i).classList.remove('active');
+    document.getElementById('dot' + i).classList.add('done');
+  }
+
+  function fireParticle(i) {
+    const p = document.getElementById('p' + i);
+    const c = document.getElementById('c' + i);
+    c.classList.add('active');
+    p.style.animation = 'none';
+    requestAnimationFrame(() => {
+      p.style.animation = `travel ${STEP_MS * 0.55}ms ease forwards`;
+    });
+  }
+
+  function startAnimation() {
+    clear();
+    step = 0;
+
+    function tick(i) {
+      activateNode(i);
+
+      if (i < STEPS - 1) {
+        timers.push(setTimeout(() => {
+          doneNode(i);
+          fireParticle(i);
+        }, STEP_MS * 0.75));
+
+        timers.push(setTimeout(() => tick(i + 1), STEP_MS));
+      } else {
+        timers.push(setTimeout(() => {
+          document.getElementById('replay-btn').style.display = 'inline-block';
+        }, STEP_MS));
+      }
+    }
+
+    tick(0);
+  }
+
+  setTimeout(startAnimation, 600);
+</script>
+</body>
+</html>

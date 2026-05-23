@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- Background: dark gradient with subtle glow at top -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1e293b"/>
+      <stop offset="1" stop-color="#0b1220"/>
+    </linearGradient>
+    <radialGradient id="halo" cx="0.5" cy="0.35" r="0.6">
+      <stop offset="0" stop-color="#3b82f6" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#3b82f6" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="verified" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#22c55e"/>
+      <stop offset="1" stop-color="#10b981"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Rounded-square base -->
+  <rect width="256" height="256" rx="56" fill="url(#bg)"/>
+  <rect width="256" height="256" rx="56" fill="url(#halo)"/>
+
+  <!-- Hooded-figure silhouette (anonymous reviewer)
+       The hood is one continuous shape; the inner ellipse "carves" out the
+       face so we get a hood-with-empty-face look without a separate fill. -->
+  <g transform="translate(0,4)">
+    <path d="M128 62
+             c-40 0 -64 32 -64 70
+             v52
+             c0 6 4 10 10 10
+             h108
+             c6 0 10 -4 10 -10
+             v-52
+             c0 -38 -24 -70 -64 -70 z"
+          fill="#e2e8f0"/>
+    <!-- Inner face void: solid background color -->
+    <path d="M128 92
+             c-22 0 -36 18 -36 40
+             c0 14 8 26 20 32
+             h32
+             c12 -6 20 -18 20 -32
+             c0 -22 -14 -40 -36 -40 z"
+          fill="url(#bg)"/>
+    <!-- Mask slits suggesting eyes (hint of identity, none revealed) -->
+    <rect x="108" y="130" width="14" height="4" rx="2" fill="#e2e8f0" opacity="0.85"/>
+    <rect x="134" y="130" width="14" height="4" rx="2" fill="#e2e8f0" opacity="0.85"/>
+  </g>
+
+  <!-- Verified-review badge: green circle with checkmark, lower-right -->
+  <g transform="translate(184,184)">
+    <circle r="36" fill="url(#verified)"/>
+    <circle r="36" fill="none" stroke="#0b1220" stroke-width="4"/>
+    <path d="M -14 2 L -4 12 L 16 -10"
+          stroke="white" stroke-width="6" fill="none"
+          stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>
