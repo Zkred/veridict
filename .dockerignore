@@ -12,7 +12,6 @@ longfellow-zk
 prover/build
 .env
 .git
-assets
 docs
 scripts
 !scripts/start-service.sh

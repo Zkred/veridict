@@ -7,35 +7,70 @@ from html import escape
 
 CSS = """
 <style>
+/*
+   Veridict design tokens.
+
+   The palette is shared between every page (homepage, dashboard, review,
+   approve result, synthesize). Single accent is lime/forest green so the
+   "Math" gradient on the headline and the "approve" affordance everywhere
+   speak the same colour. Tokens are referenced everywhere — never use
+   hardcoded hex outside this block.
+*/
 :root {
   color-scheme: light dark;
-  --fg: #1f2328;
-  --fg-muted: #59636e;
-  --bg: #ffffff;
-  --bg-soft: #f6f8fa;
-  --border: #d1d9e0;
-  --accent: #0969da;
-  --accent-hover: #0550ae;
-  --success: #1a7f37;
-  --success-bg: #dafbe1;
-  --danger: #cf222e;
-  --danger-bg: #ffebe9;
-  --shadow: 0 1px 0 rgba(31,35,40,0.04), 0 1px 3px rgba(31,35,40,0.05);
+  /* Light mode (default) — clean, paper-feel */
+  --fg:           #0a0a0a;
+  --fg-strong:    #000000;
+  --fg-muted:     #525252;
+  --fg-subtle:    #888888;
+  --bg:           #ffffff;
+  --bg-soft:      #f5f6f8;
+  --bg-card:      #ffffff;
+  --bg-elev:      #fafafa;
+  --border:       #e5e7eb;
+  --border-strong:#d4d4d8;
+  --accent:       #15803d;   /* forest green (light-mode legible) */
+  --accent-hover: #166534;
+  --accent-fg:    #ffffff;
+  --accent-soft:  rgba(21,128,61,0.08);
+  --accent-glow:  rgba(21,128,61,0.18);
+  --warn:         #c2410c;   /* coral for "pain" callouts */
+  --warn-soft:    rgba(194,65,12,0.10);
+  --success:      #15803d;
+  --success-bg:   rgba(21,128,61,0.10);
+  --danger:       #b91c1c;
+  --danger-bg:    rgba(185,28,28,0.08);
+  --shadow:       0 1px 0 rgba(15,17,21,0.03), 0 2px 8px rgba(15,17,21,0.06);
+  --grad-from:    #15803d;
+  --grad-to:      #16a34a;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --fg: #e6edf3;
-    --fg-muted: #9198a1;
-    --bg: #0d1117;
-    --bg-soft: #151b23;
-    --border: #3d444d;
-    --accent: #4493f8;
-    --accent-hover: #6cb6ff;
-    --success: #3fb950;
-    --success-bg: rgba(56,139,82,0.15);
-    --danger: #f85149;
-    --danger-bg: rgba(248,81,73,0.15);
-    --shadow: 0 0 0 1px rgba(0,0,0,0.2), 0 4px 12px rgba(0,0,0,0.3);
+    /* Dark mode — manifesto / cinematic */
+    --fg:           #f5f5f5;
+    --fg-strong:    #ffffff;
+    --fg-muted:     #9a9a9a;
+    --fg-subtle:    #6a6a6a;
+    --bg:           #0a0a0a;
+    --bg-soft:      #161616;
+    --bg-card:      #0d0d0d;
+    --bg-elev:      #1a1a1a;
+    --border:       #1f1f1f;
+    --border-strong:#2a2a2a;
+    --accent:       #7CFF6B;   /* electric lime, only legible on dark */
+    --accent-hover: #9aff8c;
+    --accent-fg:    #0a0a0a;
+    --accent-soft:  rgba(124,255,107,0.10);
+    --accent-glow:  rgba(124,255,107,0.40);
+    --warn:         #ff8a65;
+    --warn-soft:    rgba(255,138,101,0.12);
+    --success:      #7CFF6B;
+    --success-bg:   rgba(124,255,107,0.10);
+    --danger:       #ff6b6b;
+    --danger-bg:    rgba(255,107,107,0.12);
+    --shadow:       0 0 0 1px rgba(0,0,0,0.2), 0 4px 12px rgba(0,0,0,0.4);
+    --grad-from:    #7CFF6B;
+    --grad-to:      #4ade80;
   }
 }
 * { box-sizing: border-box; }
@@ -48,18 +83,28 @@ body {
 }
 .topbar {
   position: sticky; top: 0; z-index: 10;
-  background: var(--bg-soft);
+  background: var(--bg);
   border-bottom: 1px solid var(--border);
-  padding: 0.75rem 1.5rem;
+  padding: 1rem 1.5rem;
   display: flex; justify-content: space-between; align-items: center;
   font-size: 0.875rem;
+  backdrop-filter: saturate(160%) blur(8px);
 }
-.topbar .brand { font-weight: 600; }
+.topbar .brand {
+  font-weight: 600; letter-spacing: -0.005em;
+  display: inline-flex; align-items: center; gap: 0.55rem;
+}
 .topbar .brand .logo {
-  display: inline-block; width: 18px; height: 18px;
-  margin-right: 6px; vertical-align: -3px;
-  background: var(--accent); border-radius: 50%;
-  box-shadow: inset 0 0 0 3px var(--bg-soft);
+  display: inline-block; width: 22px; height: 22px;
+  border-radius: 6px;
+  background-image: url('/static/bot-avatar.svg');
+  background-size: contain;
+  background-repeat: no-repeat;
+  flex-shrink: 0;
+}
+.topbar .brand a {
+  display: inline-flex; align-items: center; gap: 0.55rem;
+  color: inherit; text-decoration: none;
 }
 .topbar .right { display: flex; gap: 1rem; align-items: center; }
 .topbar .who { color: var(--fg-muted); }
@@ -95,28 +140,28 @@ input[type=text] {
 input[type=text]:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(9,105,218,0.2);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 .btn {
-  display: inline-flex; align-items: center; gap: 0.4rem;
-  padding: 0.55rem 1rem;
-  border-radius: 6px;
+  display: inline-flex; align-items: center; gap: 0.45rem;
+  padding: 0.6rem 1.1rem;
+  border-radius: 999px;
   background: var(--accent);
-  color: white;
+  color: var(--accent-fg);
   text-decoration: none;
   border: 1px solid transparent;
-  font: inherit; font-weight: 500;
+  font: inherit; font-weight: 600;
   cursor: pointer;
-  transition: background 0.15s;
+  transition: background 0.15s, transform 0.12s, filter 0.15s;
 }
-.btn:hover { background: var(--accent-hover); }
-.btn.large { padding: 0.7rem 1.4rem; font-size: 1rem; }
+.btn:hover { background: var(--accent-hover); transform: translateY(-1px); }
+.btn.large { padding: 0.78rem 1.4rem; font-size: 0.95rem; }
 .btn.secondary {
-  background: var(--bg-soft); color: var(--fg);
-  border: 1px solid var(--border);
+  background: transparent; color: var(--fg);
+  border: 1px solid var(--border-strong);
 }
-.btn.secondary:hover { background: var(--border); }
-.btn[disabled] { opacity: 0.6; cursor: wait; }
+.btn.secondary:hover { background: var(--bg-soft); border-color: var(--accent); transform: translateY(-1px); }
+.btn[disabled] { opacity: 0.5; cursor: not-allowed; transform: none; }
 .btn .gh { width: 16px; height: 16px; fill: currentColor; }
 .meta { color: var(--fg-muted); font-size: 0.875rem; margin: 0.5rem 0; }
 .kbd {
@@ -158,7 +203,7 @@ input[type=text]:focus {
 }
 .howitworks li .step {
   flex-shrink: 0;
-  background: var(--accent); color: white;
+  background: var(--accent); color: var(--accent-fg);
   width: 1.5rem; height: 1.5rem; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
   font-size: 0.8rem; font-weight: 600;
@@ -230,6 +275,11 @@ def page(title: str, body: str, user: str | None = None) -> str:
     return f"""<!doctype html><html><head><meta charset=utf-8>
 <title>{escape(title)}</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="alternate icon" type="image/png" href="/favicon.ico">
+<link rel="apple-touch-icon" href="/static/bot-avatar.png">
+<meta name="theme-color" content="#0a0a0a" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
 {CSS}</head><body>{_topbar(user)}<div class="container">{body}</div></body></html>"""
 
 
@@ -238,13 +288,9 @@ def login_page(error: str | None = None) -> str:
     return page("Veridict · Math approves the merge.", f"""
       <script>document.documentElement.classList.add('js-reveals');</script>
       <style>
-        /* ── Force opinionated dark theme for the landing only ────────── */
-        body {{ background: #0a0a0a; color: #f5f5f5;
-                font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif; }}
-        .topbar {{ background: transparent !important; border-bottom: 1px solid #1a1a1a !important;
-                   padding: 1rem 1.5rem !important; }}
-        .topbar .brand, .topbar a {{ color: #f5f5f5 !important; }}
-        .topbar .brand .logo {{ background: #7CFF6B !important; box-shadow: inset 0 0 0 3px #0a0a0a !important; }}
+        /* Landing-only container override (homepage needs full-width sections). */
+        body {{ font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif; }}
+        .topbar {{ background: transparent !important; }}
         .container {{ max-width: 100% !important; padding: 0 !important; }}
 
         /* ── shared landing tokens ─────────────────────────────────────── */
@@ -252,10 +298,10 @@ def login_page(error: str | None = None) -> str:
         .v-eyebrow {{
           display:inline-flex; align-items:center; gap:0.5rem;
           font-size:0.7rem; font-weight:600; letter-spacing:0.18em;
-          text-transform:uppercase; color:#7CFF6B;
+          text-transform:uppercase; color:var(--accent);
         }}
         .v-eyebrow::before {{
-          content:""; width:24px; height:1px; background:#7CFF6B;
+          content:""; width:24px; height:1px; background:var(--accent);
         }}
         .v-h2 {{
           font-size: clamp(2rem, 4.5vw, 3.2rem);
@@ -265,7 +311,7 @@ def login_page(error: str | None = None) -> str:
         }}
         .v-lede {{
           font-size: 1.05rem; line-height: 1.6;
-          color: #999; max-width: 60ch; margin: 0;
+          color: var(--fg-muted); max-width: 60ch; margin: 0;
         }}
         .v-btn {{
           display:inline-flex; align-items:center; gap:0.45rem;
@@ -273,39 +319,39 @@ def login_page(error: str | None = None) -> str:
           font-size:0.92rem; text-decoration:none; border:1px solid transparent;
           transition: transform 0.15s, background 0.15s, color 0.15s;
         }}
-        .v-btn-primary {{ background:#7CFF6B; color:#0a0a0a; }}
-        .v-btn-primary:hover {{ background:#9aff8c; transform: translateY(-1px); }}
-        .v-btn-ghost {{ background:transparent; color:#f5f5f5; border-color:#262626; }}
-        .v-btn-ghost:hover {{ background:#161616; border-color:#3a3a3a; }}
+        .v-btn-primary {{ background:var(--accent); color:var(--bg); }}
+        .v-btn-primary:hover {{ background:var(--accent-hover); transform: translateY(-1px); }}
+        .v-btn-ghost {{ background:transparent; color:var(--fg); border-color:var(--border-strong); }}
+        .v-btn-ghost:hover {{ background:var(--border); border-color:var(--border-strong); }}
         .v-btn .gh {{ width:16px; height:16px; fill:currentColor; }}
 
         /* ── HERO ──────────────────────────────────────────────────────── */
         .v-hero {{
           padding: 6rem 1.5rem 5rem; text-align: center;
           background:
-            radial-gradient(ellipse 70% 50% at 50% 0%, rgba(124,255,107,0.10), transparent 60%),
-            radial-gradient(ellipse 50% 40% at 50% 100%, rgba(124,255,107,0.04), transparent 65%);
+            radial-gradient(ellipse 70% 50% at 50% 0%, var(--accent-soft), transparent 60%),
+            radial-gradient(ellipse 50% 40% at 50% 100%, var(--accent-soft), transparent 65%);
           position: relative; overflow: hidden;
         }}
         .v-hero::after {{
           content:""; position:absolute; bottom:0; left:0; right:0; height:1px;
-          background: linear-gradient(90deg, transparent, #1f1f1f 30%, #1f1f1f 70%, transparent);
+          background: linear-gradient(90deg, transparent, var(--border) 30%, var(--border) 70%, transparent);
         }}
         .v-hero .tag {{
           display:inline-flex; align-items:center; gap:0.5rem;
           padding:0.4rem 0.9rem;
-          background: rgba(124,255,107,0.08);
-          border: 1px solid rgba(124,255,107,0.25);
+          background: var(--accent-soft);
+          border: 1px solid var(--accent-glow);
           border-radius:999px; font-size:0.72rem; font-weight:500;
-          color:#7CFF6B; letter-spacing:0.06em; text-transform:uppercase;
+          color:var(--accent); letter-spacing:0.06em; text-transform:uppercase;
         }}
         .v-hero .tag .pulse {{
-          width:6px; height:6px; border-radius:50%; background:#7CFF6B;
-          box-shadow: 0 0 0 4px rgba(124,255,107,0.18);
+          width:6px; height:6px; border-radius:50%; background:var(--accent);
+          box-shadow: 0 0 0 4px var(--accent-glow);
           animation: vPulse 2.4s ease-in-out infinite;
         }}
         @keyframes vPulse {{
-          0%,100% {{ box-shadow: 0 0 0 0 rgba(124,255,107,0.4); }}
+          0%,100% {{ box-shadow: 0 0 0 0 var(--accent-glow); }}
           50% {{ box-shadow: 0 0 0 6px rgba(124,255,107,0); }}
         }}
         .v-hero h1 {{
@@ -316,9 +362,9 @@ def login_page(error: str | None = None) -> str:
           max-width: 14ch;
           font-weight: 600;
         }}
-        .v-hero h1 .accent {{ color: #7CFF6B; }}
+        .v-hero h1 .accent {{ color: var(--accent); }}
         .v-hero .sublede {{
-          color:#999; font-size:1.1rem; line-height:1.55;
+          color:var(--fg-muted); font-size:1.1rem; line-height:1.55;
           max-width: 50ch; margin: 0 auto 2.5rem;
         }}
         .v-hero .cta {{
@@ -328,19 +374,19 @@ def login_page(error: str | None = None) -> str:
         /* ── MANIFESTO BLOCK ──────────────────────────────────────────── */
         .v-manifesto {{
           padding: 7rem 1.5rem; text-align: center;
-          border-bottom: 1px solid #161616;
+          border-bottom: 1px solid var(--border);
         }}
         .v-manifesto p {{
           font-size: clamp(1.6rem, 3.8vw, 2.6rem);
           line-height: 1.18; letter-spacing: -0.03em;
-          color:#f5f5f5; max-width: 22ch; margin: 0 auto;
+          color:var(--fg); max-width: 22ch; margin: 0 auto;
           font-weight: 500;
         }}
-        .v-manifesto .strike {{ color: #555; }}
-        .v-manifesto .accent {{ color: #7CFF6B; }}
+        .v-manifesto .strike {{ color: var(--fg-subtle); }}
+        .v-manifesto .accent {{ color: var(--accent); }}
 
         /* ── SECTION ──────────────────────────────────────────────────── */
-        .v-section {{ padding: 6rem 1.5rem; border-bottom: 1px solid #161616; }}
+        .v-section {{ padding: 6rem 1.5rem; border-bottom: 1px solid var(--border); }}
         .v-split {{
           display: grid; grid-template-columns: 1fr 1fr; gap: 4rem;
           align-items: center;
@@ -349,55 +395,55 @@ def login_page(error: str | None = None) -> str:
 
         /* ── TERMINAL/CODE MOCK ───────────────────────────────────────── */
         .v-terminal {{
-          background:#0d0d0d; border:1px solid #1f1f1f;
+          background:var(--bg-card); border:1px solid var(--border);
           border-radius: 10px; overflow:hidden;
           font-family: ui-monospace, "JetBrains Mono", SFMono-Regular, Menlo, monospace;
           font-size: 0.82rem; line-height: 1.55;
         }}
         .v-terminal .bar {{
-          padding: 0.7rem 1rem; background: #111;
+          padding: 0.7rem 1rem; background: var(--bg-elev);
           display:flex; align-items:center; gap:0.4rem;
-          border-bottom: 1px solid #1f1f1f;
+          border-bottom: 1px solid var(--border);
         }}
         .v-terminal .bar .dot {{ width:10px; height:10px; border-radius:50%; }}
         .v-terminal .bar .red {{ background:#ff5f56; }}
         .v-terminal .bar .yellow {{ background:#ffbd2e; }}
         .v-terminal .bar .green {{ background:#27c93f; }}
         .v-terminal .bar .title {{
-          margin-left: 0.6rem; color:#666; font-size:0.74rem;
+          margin-left: 0.6rem; color:var(--fg-subtle); font-size:0.74rem;
         }}
         .v-terminal pre {{
-          padding: 1.1rem 1.25rem; margin:0; color:#d0d0d0;
+          padding: 1.1rem 1.25rem; margin:0; color:var(--fg);
           overflow-x: auto;
         }}
-        .v-terminal .ok {{ color: #7CFF6B; }}
-        .v-terminal .dim {{ color: #5a5a5a; }}
+        .v-terminal .ok {{ color: var(--accent); }}
+        .v-terminal .dim {{ color: var(--fg-subtle); }}
         .v-terminal .warn {{ color: #ffc66b; }}
-        .v-terminal .cmd {{ color: #888; }}
+        .v-terminal .cmd {{ color: var(--fg-subtle); }}
 
         /* ── PROOF RECEIPT CARD ───────────────────────────────────────── */
         .v-receipt {{
-          background:#0d0d0d; border:1px solid #1f1f1f; border-radius:14px;
+          background:var(--bg-card); border:1px solid var(--border); border-radius:14px;
           padding: 1.5rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
           font-size: 0.78rem;
         }}
         .v-receipt h4 {{
           margin:0 0 1rem; font-family:inherit; font-weight:600;
-          font-size: 0.78rem; letter-spacing:0.1em; color:#7CFF6B;
+          font-size: 0.78rem; letter-spacing:0.1em; color:var(--accent);
           text-transform: uppercase; display:flex; align-items:center; gap:0.5rem;
         }}
         .v-receipt h4 .badge-ok {{
-          background: rgba(124,255,107,0.12); color:#7CFF6B;
+          background: var(--accent-soft); color:var(--accent);
           padding: 0.15rem 0.55rem; border-radius:999px;
           font-size:0.66rem; letter-spacing: 0.08em;
         }}
         .v-receipt .row {{
           display:flex; justify-content:space-between;
-          padding: 0.45rem 0; border-bottom: 1px solid #161616;
+          padding: 0.45rem 0; border-bottom: 1px solid var(--border);
         }}
         .v-receipt .row:last-child {{ border-bottom: none; }}
-        .v-receipt .k {{ color:#666; }}
-        .v-receipt .v {{ color:#e0e0e0; text-align:right; word-break:break-all; }}
+        .v-receipt .k {{ color:var(--fg-subtle); }}
+        .v-receipt .v {{ color:var(--fg); text-align:right; word-break:break-all; }}
 
         /* ── TRUST GRID ───────────────────────────────────────────────── */
         .v-trustgrid {{
@@ -406,19 +452,19 @@ def login_page(error: str | None = None) -> str:
         }}
         @media(max-width:720px) {{ .v-trustgrid {{ grid-template-columns: 1fr; }} }}
         .v-tc {{
-          background:#0d0d0d; border:1px solid #1f1f1f; border-radius:12px;
+          background:var(--bg-card); border:1px solid var(--border); border-radius:12px;
           padding: 1.3rem 1.5rem;
         }}
         .v-tc h4 {{
           margin:0 0 0.75rem; font-size:0.78rem; font-weight:600;
-          letter-spacing:0.12em; text-transform:uppercase; color:#7CFF6B;
+          letter-spacing:0.12em; text-transform:uppercase; color:var(--accent);
         }}
-        .v-tc ul {{ margin:0; padding:0; list-style:none; font-size:0.9rem; color:#bbb; }}
+        .v-tc ul {{ margin:0; padding:0; list-style:none; font-size:0.9rem; color:var(--fg-muted); }}
         .v-tc li {{ padding: 0.3rem 0; display:flex; gap:0.55rem; align-items:flex-start; }}
         .v-tc li::before {{ flex-shrink:0; margin-top:1px; font-weight:700; }}
-        .v-tc li.sees::before {{ content:"›"; color:#7CFF6B; }}
-        .v-tc li.blind::before {{ content:"–"; color:#555; }}
-        .v-tc li.blind {{ color: #777; }}
+        .v-tc li.sees::before {{ content:"›"; color:var(--accent); }}
+        .v-tc li.blind::before {{ content:"–"; color:var(--fg-subtle); }}
+        .v-tc li.blind {{ color: var(--fg-subtle); }}
 
         /* ── HONEST LIMITS ────────────────────────────────────────────── */
         .v-limits {{
@@ -427,39 +473,39 @@ def login_page(error: str | None = None) -> str:
         }}
         @media(max-width:720px) {{ .v-limits {{ grid-template-columns: 1fr; }} }}
         .v-limit {{
-          background:#0d0d0d; border:1px solid #1f1f1f; border-radius:12px;
+          background:var(--bg-card); border:1px solid var(--border); border-radius:12px;
           padding:1.3rem 1.5rem;
         }}
         .v-limit .label {{
           font-size:0.7rem; font-weight:600; letter-spacing:0.14em;
-          text-transform:uppercase; color:#ff8a65; margin-bottom: 0.5rem;
+          text-transform:uppercase; color:var(--warn); margin-bottom: 0.5rem;
         }}
         .v-limit h4 {{ margin:0 0 0.4rem; font-size:1rem; }}
-        .v-limit p {{ margin:0; color:#888; font-size:0.88rem; line-height:1.55; }}
+        .v-limit p {{ margin:0; color:var(--fg-subtle); font-size:0.88rem; line-height:1.55; }}
 
         /* ── FOOTER CTA ───────────────────────────────────────────────── */
         .v-final {{
           padding: 8rem 1.5rem 6rem;
           text-align: center;
-          background: radial-gradient(ellipse 50% 60% at 50% 60%, rgba(124,255,107,0.06), transparent 65%);
-          border-bottom: 1px solid #161616;
+          background: radial-gradient(ellipse 50% 60% at 50% 60%, var(--accent-soft), transparent 65%);
+          border-bottom: 1px solid var(--border);
         }}
         .v-final h2 {{
           font-size: clamp(2.4rem, 6vw, 4.5rem); line-height: 1;
           letter-spacing: -0.05em; margin: 0 auto 1rem;
           max-width: 16ch; font-weight: 600;
         }}
-        .v-final .accent {{ color:#7CFF6B; }}
-        .v-final p {{ color:#999; margin: 0 auto 2.5rem; max-width: 50ch; }}
+        .v-final .accent {{ color:var(--accent); }}
+        .v-final p {{ color:var(--fg-muted); margin: 0 auto 2.5rem; max-width: 50ch; }}
 
         /* ── FOOTER STRIP ─────────────────────────────────────────────── */
         .v-foot {{
           padding: 2rem 1.5rem;
           display:flex; justify-content:space-between; gap:1rem; flex-wrap:wrap;
-          color:#555; font-size:0.78rem;
+          color:var(--fg-subtle); font-size:0.78rem;
         }}
-        .v-foot a {{ color:#999; text-decoration:none; }}
-        .v-foot a:hover {{ color:#7CFF6B; }}
+        .v-foot a {{ color:var(--fg-muted); text-decoration:none; }}
+        .v-foot a:hover {{ color:var(--accent); }}
         .v-foot .sep {{ color:#222; margin: 0 0.5rem; }}
 
         /* ── INLINE STACK ────────────────────────────────────────────── */
@@ -469,15 +515,15 @@ def login_page(error: str | None = None) -> str:
         }}
         @media(max-width:880px) {{ .v-pillars {{ grid-template-columns: 1fr; }} }}
         .v-pill {{
-          background:#0d0d0d; border:1px solid #1f1f1f; border-radius:12px;
+          background:var(--bg-card); border:1px solid var(--border); border-radius:12px;
           padding: 1.5rem 1.6rem 1.7rem;
         }}
         .v-pill .num {{
           font-size:0.7rem; font-weight:600; letter-spacing:0.16em;
-          text-transform:uppercase; color:#7CFF6B; margin-bottom:0.8rem;
+          text-transform:uppercase; color:var(--accent); margin-bottom:0.8rem;
         }}
         .v-pill h3 {{ margin: 0 0 0.5rem; font-size: 1.1rem; letter-spacing: -0.01em; }}
-        .v-pill p {{ margin: 0; color: #888; font-size: 0.9rem; line-height: 1.55; }}
+        .v-pill p {{ margin: 0; color: var(--fg-subtle); font-size: 0.9rem; line-height: 1.55; }}
 
         /* ── INCIDENTS ──────────────────────────────────────────────────── */
         .v-incidents {{
@@ -486,45 +532,45 @@ def login_page(error: str | None = None) -> str:
         }}
         @media(max-width:720px) {{ .v-incidents {{ grid-template-columns: 1fr; }} }}
         .v-incident {{
-          background:#0d0d0d; border:1px solid #1f1f1f; border-radius:12px;
+          background:var(--bg-card); border:1px solid var(--border); border-radius:12px;
           padding: 1.4rem 1.6rem 1.5rem;
           position: relative;
           transition: border-color 0.2s, transform 0.2s;
         }}
-        .v-incident:hover {{ border-color:#2a2a2a; transform: translateY(-2px); }}
+        .v-incident:hover {{ border-color:var(--border-strong); transform: translateY(-2px); }}
         .v-incident-tag {{
           font-family: ui-monospace, "JetBrains Mono", SFMono-Regular, monospace;
           font-size: 0.7rem; font-weight: 600;
           letter-spacing: 0.18em; text-transform: uppercase;
-          color: #ff8a65;
+          color: var(--warn);
           margin-bottom: 0.85rem;
           display: inline-flex; align-items: center; gap: 0.55rem;
         }}
         .v-incident-tag::before {{
           content:""; width:6px; height:6px; border-radius:50%;
-          background:#ff8a65; box-shadow:0 0 0 3px rgba(255,138,101,0.16);
+          background:var(--warn); box-shadow:0 0 0 3px var(--warn-soft);
         }}
         .v-incident-line {{
-          margin: 0; color: #d5d5d5;
+          margin: 0; color: var(--fg);
           font-size: 0.97rem; line-height: 1.6;
         }}
-        .v-incident-line .q {{ color: #f5f5f5; font-style: italic; }}
+        .v-incident-line .q {{ color: var(--fg); font-style: italic; }}
         .v-incident-cite {{
           display: inline-block; margin-top: 0.95rem;
-          color: #555; text-decoration: none;
+          color: var(--fg-subtle); text-decoration: none;
           font-size: 0.76rem; letter-spacing: 0.02em;
           transition: color 0.15s;
         }}
-        .v-incident-cite:hover {{ color: #7CFF6B; }}
+        .v-incident-cite:hover {{ color: var(--accent); }}
         .v-incidents-tie {{
           margin-top: 2rem;
           padding: 1.25rem 1.4rem;
-          border-left: 2px solid #7CFF6B;
-          background: linear-gradient(90deg, rgba(124,255,107,0.04), transparent 70%);
-          font-size: 1rem; line-height: 1.65; color: #bbb;
+          border-left: 2px solid var(--accent);
+          background: linear-gradient(90deg, var(--accent-soft), transparent 70%);
+          font-size: 1rem; line-height: 1.65; color: var(--fg-muted);
           border-radius: 0 8px 8px 0;
         }}
-        .v-incidents-tie strong {{ color: #f5f5f5; }}
+        .v-incidents-tie strong {{ color: var(--fg); }}
 
         /* ─────────────────────────────────────────────────────────────────
            ANIMATED PIPELINE
@@ -535,11 +581,11 @@ def login_page(error: str | None = None) -> str:
            ───────────────────────────────────────────────────────────────── */
         .v-flow-wrap {{
           background:
-            radial-gradient(ellipse 60% 40% at 50% 50%, rgba(124,255,107,0.05), transparent 70%);
+            radial-gradient(ellipse 60% 40% at 50% 50%, var(--accent-soft), transparent 70%);
           padding: 4rem 0 3rem;
           border-radius: 16px;
           margin-top: 2.5rem;
-          border: 1px solid #161616;
+          border: 1px solid var(--border);
           position: relative;
           overflow: hidden;
         }}
@@ -551,15 +597,15 @@ def login_page(error: str | None = None) -> str:
           position: absolute;
           left: 2.5rem; right: 2.5rem;
           top: 36px; height: 2px;
-          background: #1a1a1a;
+          background: var(--border);
           border-radius: 1px;
           overflow: visible;
         }}
         .v-flow-fill {{
           position: absolute; inset: 0 100% 0 0;
-          background: linear-gradient(90deg, transparent, #7CFF6B);
+          background: linear-gradient(90deg, transparent, var(--accent));
           animation: vFlowFill 8s ease-in-out infinite;
-          box-shadow: 0 0 8px rgba(124,255,107,0.4);
+          box-shadow: 0 0 8px var(--accent-glow);
         }}
         @keyframes vFlowFill {{
           0%      {{ right: 100%; opacity: 0; }}
@@ -571,10 +617,10 @@ def login_page(error: str | None = None) -> str:
         .v-flow-particle {{
           position: absolute; top: 36px; left: 0;
           width: 14px; height: 14px;
-          background: #7CFF6B;
+          background: var(--accent);
           border-radius: 50%;
           transform: translate(-50%, -50%);
-          box-shadow: 0 0 18px 4px rgba(124,255,107,0.55);
+          box-shadow: 0 0 18px 4px var(--accent-glow);
           animation: vFlowParticle 8s ease-in-out infinite;
           z-index: 2;
         }}
@@ -603,11 +649,11 @@ def login_page(error: str | None = None) -> str:
         .v-fnode-dot {{
           width: 70px; height: 70px;
           margin: 0 auto;
-          background: #0d0d0d;
-          border: 2px solid #1f1f1f;
+          background: var(--bg-card);
+          border: 2px solid var(--border);
           border-radius: 50%;
           display: flex; align-items: center; justify-content: center;
-          color: #555; /* SVG stroke inherits */
+          color: var(--fg-subtle); /* SVG stroke inherits */
           transition: none; /* let keyframes own visual changes */
           position: relative;
         }}
@@ -626,7 +672,7 @@ def login_page(error: str | None = None) -> str:
         }}
         .v-fnode-sub {{
           margin-top: 0.2rem;
-          font-size: 0.72rem; color:#666;
+          font-size: 0.72rem; color:var(--fg-subtle);
           line-height: 1.4;
         }}
 
@@ -639,47 +685,47 @@ def login_page(error: str | None = None) -> str:
         .v-fnode-6 .v-fnode-dot {{ animation: vNode6 8s ease-in-out infinite; }}
 
         @keyframes vNode1 {{
-          0%, 3% {{ border-color:#1f1f1f; background:#0d0d0d; color:#555; transform: scale(1); box-shadow:none; }}
-          8% {{ border-color:#7CFF6B; color:#7CFF6B; transform: scale(1.12); box-shadow: 0 0 24px 4px rgba(124,255,107,0.4); }}
-          14%, 90% {{ border-color: rgba(124,255,107,0.5); color: rgba(124,255,107,0.85); transform: scale(1); box-shadow:none; }}
-          100% {{ border-color:#1f1f1f; background:#0d0d0d; color:#555; }}
+          0%, 3% {{ border-color:var(--border); background:var(--bg-card); color:var(--fg-subtle); transform: scale(1); box-shadow:none; }}
+          8% {{ border-color:var(--accent); color:var(--accent); transform: scale(1.12); box-shadow: 0 0 24px 4px var(--accent-glow); }}
+          14%, 90% {{ border-color: var(--accent-glow); color: var(--accent); transform: scale(1); box-shadow:none; }}
+          100% {{ border-color:var(--border); background:var(--bg-card); color:var(--fg-subtle); }}
         }}
         @keyframes vNode2 {{
-          0%, 16% {{ border-color:#1f1f1f; background:#0d0d0d; color:#555; transform: scale(1); box-shadow:none; }}
-          22% {{ border-color:#7CFF6B; color:#7CFF6B; transform: scale(1.12); box-shadow: 0 0 24px 4px rgba(124,255,107,0.4); }}
-          28%, 90% {{ border-color: rgba(124,255,107,0.5); color: rgba(124,255,107,0.85); transform: scale(1); box-shadow:none; }}
-          100% {{ border-color:#1f1f1f; background:#0d0d0d; color:#555; }}
+          0%, 16% {{ border-color:var(--border); background:var(--bg-card); color:var(--fg-subtle); transform: scale(1); box-shadow:none; }}
+          22% {{ border-color:var(--accent); color:var(--accent); transform: scale(1.12); box-shadow: 0 0 24px 4px var(--accent-glow); }}
+          28%, 90% {{ border-color: var(--accent-glow); color: var(--accent); transform: scale(1); box-shadow:none; }}
+          100% {{ border-color:var(--border); background:var(--bg-card); color:var(--fg-subtle); }}
         }}
         @keyframes vNode3 {{
-          0%, 33% {{ border-color:#1f1f1f; background:#0d0d0d; color:#555; transform: scale(1); box-shadow:none; }}
-          39% {{ border-color:#7CFF6B; color:#7CFF6B; transform: scale(1.12); box-shadow: 0 0 24px 4px rgba(124,255,107,0.4); }}
-          45%, 90% {{ border-color: rgba(124,255,107,0.5); color: rgba(124,255,107,0.85); transform: scale(1); box-shadow:none; }}
-          100% {{ border-color:#1f1f1f; background:#0d0d0d; color:#555; }}
+          0%, 33% {{ border-color:var(--border); background:var(--bg-card); color:var(--fg-subtle); transform: scale(1); box-shadow:none; }}
+          39% {{ border-color:var(--accent); color:var(--accent); transform: scale(1.12); box-shadow: 0 0 24px 4px var(--accent-glow); }}
+          45%, 90% {{ border-color: var(--accent-glow); color: var(--accent); transform: scale(1); box-shadow:none; }}
+          100% {{ border-color:var(--border); background:var(--bg-card); color:var(--fg-subtle); }}
         }}
         @keyframes vNode4 {{
-          0%, 50% {{ border-color:#1f1f1f; background:#0d0d0d; color:#555; transform: scale(1); box-shadow:none; }}
-          56% {{ border-color:#7CFF6B; color:#7CFF6B; transform: scale(1.12); box-shadow: 0 0 24px 4px rgba(124,255,107,0.4); }}
-          62%, 90% {{ border-color: rgba(124,255,107,0.5); color: rgba(124,255,107,0.85); transform: scale(1); box-shadow:none; }}
-          100% {{ border-color:#1f1f1f; background:#0d0d0d; color:#555; }}
+          0%, 50% {{ border-color:var(--border); background:var(--bg-card); color:var(--fg-subtle); transform: scale(1); box-shadow:none; }}
+          56% {{ border-color:var(--accent); color:var(--accent); transform: scale(1.12); box-shadow: 0 0 24px 4px var(--accent-glow); }}
+          62%, 90% {{ border-color: var(--accent-glow); color: var(--accent); transform: scale(1); box-shadow:none; }}
+          100% {{ border-color:var(--border); background:var(--bg-card); color:var(--fg-subtle); }}
         }}
         @keyframes vNode5 {{
-          0%, 67% {{ border-color:#1f1f1f; background:#0d0d0d; color:#555; transform: scale(1); box-shadow:none; }}
-          73% {{ border-color:#7CFF6B; color:#7CFF6B; transform: scale(1.12); box-shadow: 0 0 24px 4px rgba(124,255,107,0.4); }}
-          79%, 90% {{ border-color: rgba(124,255,107,0.5); color: rgba(124,255,107,0.85); transform: scale(1); box-shadow:none; }}
-          100% {{ border-color:#1f1f1f; background:#0d0d0d; color:#555; }}
+          0%, 67% {{ border-color:var(--border); background:var(--bg-card); color:var(--fg-subtle); transform: scale(1); box-shadow:none; }}
+          73% {{ border-color:var(--accent); color:var(--accent); transform: scale(1.12); box-shadow: 0 0 24px 4px var(--accent-glow); }}
+          79%, 90% {{ border-color: var(--accent-glow); color: var(--accent); transform: scale(1); box-shadow:none; }}
+          100% {{ border-color:var(--border); background:var(--bg-card); color:var(--fg-subtle); }}
         }}
         @keyframes vNode6 {{
-          0%, 84% {{ border-color:#1f1f1f; background:#0d0d0d; color:#555; transform: scale(1); box-shadow:none; }}
-          89% {{ border-color:#7CFF6B; color:#0a0a0a; transform: scale(1.18); box-shadow: 0 0 32px 8px rgba(124,255,107,0.55); background: rgba(124,255,107,0.18); }}
-          93%, 100% {{ border-color: rgba(124,255,107,0.5); background: rgba(124,255,107,0.06); color:#7CFF6B; transform: scale(1); box-shadow:none; }}
+          0%, 84% {{ border-color:var(--border); background:var(--bg-card); color:var(--fg-subtle); transform: scale(1); box-shadow:none; }}
+          89% {{ border-color:var(--accent); color:var(--bg); transform: scale(1.18); box-shadow: 0 0 32px 8px var(--accent-glow); background: var(--accent-glow); }}
+          93%, 100% {{ border-color: var(--accent-glow); background: var(--accent-soft); color:var(--accent); transform: scale(1); box-shadow:none; }}
         }}
 
         @media (prefers-reduced-motion: reduce) {{
           .v-flow-fill, .v-flow-particle, .v-fnode-dot {{ animation: none !important; }}
           .v-flow-fill {{ right: 0; opacity: 1; }}
           .v-fnode-dot {{
-            border-color: rgba(124,255,107,0.5) !important;
-            color: rgba(124,255,107,0.85) !important;
+            border-color: var(--accent-glow) !important;
+            color: var(--accent) !important;
           }}
           .v-flow-particle {{ display: none; }}
         }}
@@ -721,7 +767,7 @@ def login_page(error: str | None = None) -> str:
           display: inline-block;
           width: 6px; height: 1em;
           vertical-align: -2px;
-          background: #7CFF6B;
+          background: var(--accent);
           animation: vCursor 1s steps(2) infinite;
           margin-left: 2px;
         }}
@@ -750,7 +796,7 @@ def login_page(error: str | None = None) -> str:
           display: flex; align-items: center; justify-content: center;
           gap: 0.4rem;
           margin: 1.75rem auto 0;
-          font-style: italic; color:#666; font-size: 0.78rem;
+          font-style: italic; color:var(--fg-subtle); font-size: 0.78rem;
           letter-spacing: 0.01em;
         }}
         .v-sig .heart {{
@@ -1123,7 +1169,7 @@ def login_page(error: str | None = None) -> str:
         <div>
           Longfellow ZK<span class="sep">·</span>Claude<span class="sep">·</span>GitHub Apps
           <span class="sep">·</span>
-          <a href="https://github.com/vayu-network/anonymous-review-demo" target="_blank">Source</a>
+          <a href="https://github.com/Zkred/veridict" target="_blank">Source</a>
         </div>
       </footer>
 

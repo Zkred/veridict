@@ -50,7 +50,10 @@ RUN pip install --no-cache-dir -r issuer/requirements.txt -r backend/requirement
 COPY issuer/ ./issuer/
 COPY backend/ ./backend/
 
-# Persistent data directory (Fly.io volume mounted here)
+# Static assets (favicon, bot avatar, demo animation HTMLs)
+COPY assets/ ./assets/
+
+# Persistent data directory (mounted volume or /tmp fallback at runtime)
 RUN mkdir -p /data
 
 ENV PROVER_BIN=/app/prover/build/prover_cli

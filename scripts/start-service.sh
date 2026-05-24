@@ -1,6 +1,6 @@
 #!/bin/sh
 # Write key material from env vars to temp files before starting the server.
-# This lets Cloud Run (stateless) and Fly.io (stateful) share the same image.
+# Cloud Run is stateless; secrets land in env vars and we write them to /tmp.
 
 # Shared keys — written before service dispatch so both backend and issuer get them.
 if [ -n "$GITHUB_APP_KEY_B64" ]; then

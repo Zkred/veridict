@@ -44,7 +44,8 @@ load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"), overrid
 import httpx
 from cryptography.hazmat.primitives.asymmetric import ec
 from fastapi import Cookie, FastAPI, Form, HTTPException, Response
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 import db
 from mdoc_builder import (
@@ -196,6 +197,26 @@ async def _authorize_for_repo(
 app = FastAPI(title="Veridict Issuer")
 issuer_key = load_or_create_issuer_key(ISSUER_KEY_PATH)
 db.init_db()
+
+# Serve bot-avatar.svg/png and any other shared assets under /static/...
+# so we can reuse the GitHub App icon as the website logo + favicon.
+_ASSETS_DIR = _resolve("assets")
+if os.path.isdir(_ASSETS_DIR):
+    app.mount("/static", StaticFiles(directory=_ASSETS_DIR), name="static")
+
+
+@app.get("/favicon.svg")
+def favicon_svg() -> Response:
+    path = os.path.join(_ASSETS_DIR, "bot-avatar.svg")
+    return FileResponse(path, media_type="image/svg+xml")
+
+
+@app.get("/favicon.ico")
+def favicon_ico() -> Response:
+    # Browsers fall back to .ico when no .svg link is honoured. Serve the
+    # PNG (browsers accept it under .ico content type in practice).
+    path = os.path.join(_ASSETS_DIR, "bot-avatar.png")
+    return FileResponse(path, media_type="image/png")
 
 
 # ----- public endpoints used by the backend ----------------------------
