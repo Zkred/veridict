@@ -57,8 +57,6 @@ docs/architecture-flowchart.md
 docs/Veridict-Slides-contact.jpg
 docs/Veridict-Slides-v1-contact.jpg
 docs/Veridict-Slides-v1.md
-docs/Veridict-Slides.pdf
-docs/Veridict-Slides.pptx
 docs/Veridict-Submission-Review.md
 docs/Pitch Deck*
 docs/Gray Black Minimalist*
@@ -66,4 +64,6 @@ scripts/build_deck_v1.js
 scripts/generate_pptx.py
 scripts/build_slides.js
 *.pptx
-!docs/Veridict-Slides-v2.pdf
+.~lock.*
+!docs/Veridict-Slides.pptx
+!docs/Veridict-Slides.pdf
