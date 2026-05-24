@@ -65,5 +65,6 @@ scripts/generate_pptx.py
 scripts/build_slides.js
 *.pptx
 .~lock.*
+docs/demo-frames/
 !docs/Veridict-Slides.pptx
 !docs/Veridict-Slides.pdf
