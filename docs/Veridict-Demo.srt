@@ -1,0 +1,47 @@
+1
+00:00:00,000 --> 00:00:06,000
+Veridict. AI writes the code. Math approves the merge.
+
+2
+00:00:06,000 --> 00:00:13,000
+Three steps. One signature. Spec → synth → verify → credential → ZK proof → merge.
+
+3
+00:00:13,000 --> 00:00:17,000
+A maintainer types a spec.
+
+4
+00:00:17,000 --> 00:00:24,000
+Claude generates the implementation, pytest suite, and Z3 invariants.
+
+5
+00:00:24,000 --> 00:00:34,000
+On GitHub, the PR opens automatically. zk-review-gate is pending. Merge is blocked.
+
+6
+00:00:34,000 --> 00:00:48,000
+The reviewer opens it in Veridict. mypy, pytest, Z3 — all three formal layers green.
+
+7
+00:00:48,000 --> 00:00:54,000
+Tick reviewed. Click approve anonymously.
+
+8
+00:00:54,000 --> 00:01:06,000
+The Longfellow prover runs — about 14 seconds. The proof is bound to this exact commit SHA.
+
+9
+00:01:06,000 --> 00:01:18,000
+Receipt. Proof accepted. 1 of 1 valid. Merge gate green. Identity never transmitted.
+
+10
+00:01:18,000 --> 00:01:24,000
+Back on GitHub. Anonymous bot comment with ZK-verified attestations. Status check now green.
+
+11
+00:01:24,000 --> 00:01:30,000
+Merge pull request. Confirm.
+
+12
+00:01:30,000 --> 00:01:37,000
+Merged. AI synthesis, formally verified, anonymously approved.
