@@ -38,6 +38,7 @@ from fastapi import FastAPI, Form, HTTPException, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 
 from gh_app import get_app
+from wasm_verifier import describe as wasm_verifier_describe, get_verifier
 import db
 
 _PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -56,6 +57,12 @@ VERIFIER_BIN = _resolve(os.environ.get("VERIFIER_BIN", "./prover/build/verifier_
 # uses to prove, but the browser verifying its own proof would prove nothing.
 WASM_VERIFIER = _resolve(os.environ.get("WASM_VERIFIER", "./prover/wasm/verify.cjs"))
 NODE_BIN = os.environ.get("NODE_BIN", "node")
+# Standalone WASI build of the same module, run inside this process by wasmtime.
+# This is the preferred path: no node, no subprocess, no compiled binary, which
+# is what lets the backend run on a host that cannot build C++.
+WASM_STANDALONE = _resolve(os.environ.get(
+    "WASM_STANDALONE", "./prover/wasm/dist/veridict_standalone.wasm"
+))
 # Pre-generated circuit blob. Without it the verifier regenerates the circuit on
 # every attempt (~15 s each, and we try up to three claim values).
 CIRCUIT_HASH = os.environ.get(
@@ -263,10 +270,11 @@ async def _push_commit_status(owner: str, repo: str, sha: str,
 
 
 def _verifier_command() -> list[str] | None:
-    """The verifier to invoke, preferring WebAssembly over the native binary.
+    """Fallback verifier to invoke as a subprocess, or None if none available.
 
-    Returns None when neither is available, so callers can fail loudly rather
-    than silently accepting proofs.
+    Only used when in-process WebAssembly verification is unavailable. Prefers
+    the wasm module under node over the native binary, since the binary requires
+    a compiled artifact.
     """
     if os.path.exists(WASM_VERIFIER) and shutil.which(NODE_BIN):
         return [NODE_BIN, WASM_VERIFIER]
@@ -275,46 +283,88 @@ def _verifier_command() -> list[str] | None:
     return None
 
 
-def _run_verifier(proof_path: str, pkx: str, pky: str, transcript_hex: str, now: str) -> tuple[bool, str | None]:
-    """Returns (ok, circuit_id)."""
-    base = _verifier_command()
-    if base is None:
-        print("[verifier] no verifier available (checked "
-              f"{WASM_VERIFIER} and {VERIFIER_BIN})")
-        return False, None
+def _verify_in_process(
+    proof: bytes, claim_val: str, pkx: str, pky: str, transcript_hex: str, now: str,
+) -> int | None:
+    """Verifies with the embedded wasm runtime. None if unavailable."""
+    verifier = get_verifier(WASM_STANDALONE)
+    if verifier is None or not os.path.exists(CIRCUIT_PATH):
+        return None
+    with open(CIRCUIT_PATH, "rb") as fh:
+        circuit = fh.read()
+    return verifier.verify(
+        circuit=circuit,
+        proof=proof,
+        pkx=pkx,
+        pky=pky,
+        transcript=bytes.fromhex(transcript_hex),
+        claim_ns=CLAIM_NS,
+        claim_id=CLAIM_ID,
+        claim_cbor=bytes.fromhex(claim_val),
+        now=now,
+        doc_type=DOC_TYPE,
+    )
 
+
+def _run_verifier(proof: bytes, pkx: str, pky: str, transcript_hex: str, now: str) -> tuple[bool, str | None]:
+    """Returns (ok, circuit_id).
+
+    Verification order: embedded wasm runtime, then a subprocess fallback. The
+    embedded path needs no node, no subprocess and no compiled binary, which is
+    what makes this deployable to a serverless host.
+    """
     _MAINTAINER_HEX = "6a6d61696e7461696e6572"
     _REVIEWER_HEX = "687265766965776572"
     to_try = list(dict.fromkeys([CLAIM_VALUE_HEX, _MAINTAINER_HEX, _REVIEWER_HEX]))
 
+    # The circuit identity is known up front: it is the hash of the blob we load,
+    # which circuit_tool --check validates against kZkSpecs at build time. The old
+    # approach of scraping `id:` from verifier stderr only worked while the
+    # verifier was generating the circuit itself.
+    circuit_id = CIRCUIT_HASH if os.path.exists(CIRCUIT_PATH) else None
+
     for claim_val in to_try:
-        cmd = base + [
-            "--proof", proof_path,
-            "--pkx", pkx,
-            "--pky", pky,
-            "--transcript", transcript_hex,
-            "--claim", f"{CLAIM_NS}:{CLAIM_ID}:{claim_val}",
-            "--now", now,
-            "--doctype", DOC_TYPE,
-        ]
-        if os.path.exists(CIRCUIT_PATH):
-            cmd += ["--circuit", CIRCUIT_PATH]
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            timeout=180,
-        )
+        rc = _verify_in_process(proof, claim_val, pkx, pky, transcript_hex, now)
+        if rc is not None:
+            if rc == 0:
+                return True, circuit_id
+            print(f"[verifier] in-process claim={claim_val} rc={rc} "
+                  f"({wasm_verifier_describe(rc)})")
+            continue
+
+        base = _verifier_command()
+        if base is None:
+            print("[verifier] no verifier available (checked "
+                  f"{WASM_STANDALONE}, {WASM_VERIFIER}, {VERIFIER_BIN})")
+            return False, None
+
+        with tempfile.NamedTemporaryFile(delete=False) as tmp:
+            tmp.write(proof)
+            proof_path = tmp.name
+        try:
+            cmd = base + [
+                "--proof", proof_path,
+                "--pkx", pkx,
+                "--pky", pky,
+                "--transcript", transcript_hex,
+                "--claim", f"{CLAIM_NS}:{CLAIM_ID}:{claim_val}",
+                "--now", now,
+                "--doctype", DOC_TYPE,
+            ]
+            if os.path.exists(CIRCUIT_PATH):
+                cmd += ["--circuit", CIRCUIT_PATH]
+            result = subprocess.run(cmd, capture_output=True, timeout=180)
+        finally:
+            os.unlink(proof_path)
+
         stderr = result.stderr.decode()
         if result.returncode == 0:
-            # With a cached circuit the verifier never logs an `id:` line, because
-            # that only appeared while generating one. The identity is known
-            # up front instead: it is the circuit hash we loaded, which
-            # circuit_tool --check validates against kZkSpecs at build time.
-            if os.path.exists(CIRCUIT_PATH):
-                return True, CIRCUIT_HASH
+            if circuit_id:
+                return True, circuit_id
             m = _CIRCUIT_ID_RE.search(stderr)
             return True, (m.group(1) if m else None)
         print(f"[verifier] claim={claim_val} rc={result.returncode} stderr={stderr[:300]}")
+
     return False, None
 
 
@@ -349,13 +399,7 @@ async def submit_proof(
             total_valid=db.approval_count(pr_key),
         )
 
-    with tempfile.NamedTemporaryFile(delete=False) as tmp:
-        tmp.write(body)
-        tmp_path = tmp.name
-    try:
-        ok, circuit_id = _run_verifier(tmp_path, pub["pkx"], pub["pky"], transcript, now)
-    finally:
-        os.unlink(tmp_path)
+    ok, circuit_id = _run_verifier(body, pub["pkx"], pub["pky"], transcript, now)
 
     if not ok:
         raise HTTPException(400, "invalid proof")

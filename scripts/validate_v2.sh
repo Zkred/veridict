@@ -86,6 +86,34 @@ fi
 wasm_verify .validate/proof.bin
 check $? "wasm verifier accepts a native proof (cross-compat)"
 
+# The deployable path: no node, no subprocess, no compiled binary.
+"$PYTHON" - "$TMP/wasm.proof" <<'EOF' >/dev/null 2>&1
+import pathlib
+import sys
+
+sys.path.insert(0, "backend")
+from wasm_verifier import get_verifier
+
+root = pathlib.Path(".")
+v = get_verifier("prover/wasm/dist/veridict_standalone.wasm")
+if v is None:
+    sys.exit(2)
+pkx, pky = [l.strip() for l in
+            (root / ".validate/ours.pubkey").read_text().split("\n") if l.strip()]
+rc = v.verify(
+    circuit=(root / "prover/circuits/8d079211715200ff06c5109639245502bfe94aa869908d31176aae4016182121").read_bytes(),
+    proof=pathlib.Path(sys.argv[1]).read_bytes(),
+    pkx=pkx, pky=pky,
+    transcript=(root / ".validate/ours.transcript").read_bytes(),
+    claim_ns="org.example.reviewer", claim_id="role",
+    claim_cbor=bytes.fromhex("6a6d61696e7461696e6572"),
+    now=(root / ".validate/ours.now").read_text().strip(),
+    doc_type="org.example.reviewer.v1",
+)
+sys.exit(0 if rc == 0 else 1)
+EOF
+check $? "in-process wasm verification (wasmtime, no node/binary)"
+
 # Negative case: a verifier that accepts everything would pass every test above.
 cp "$TMP/wasm.proof" "$TMP/tampered.proof"
 "$PYTHON" - "$TMP/tampered.proof" <<'EOF'

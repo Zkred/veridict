@@ -169,5 +169,24 @@ em++ "${CFLAGS_COMMON[@]}" -std=c++17 -DLONGFELLOW_PORTABLE_CRYPTO=1 \
   -s ENVIRONMENT=web,worker,node \
   -s EXIT_RUNTIME=0
 
+step "Linking the standalone WASI module (server-side verification)"
+# Same sources, no JavaScript glue. -sSTANDALONE_WASM targets WASI, so this can
+# be instantiated directly by a wasm runtime embedded in the server process:
+# no node, no subprocess, no compiled binary. It needs five WASI calls plus
+# env.emscripten_notify_memory_growth, which the host stubs out.
+#
+# See backend/wasm_verifier.py. Built alongside the browser module rather than
+# separately so both always come from the same sources.
+em++ "${CFLAGS_COMMON[@]}" -std=c++17 -DLONGFELLOW_PORTABLE_CRYPTO=1 \
+  -I"$LF_ROOT/lib" -I"$ZSTD_ROOT/lib" \
+  prover/wasm/prover_wasm.cc "${lf_objs[@]}" "${zstd_objs[@]}" \
+  -o "$OUT_DIR/veridict_standalone.wasm" \
+  -s STANDALONE_WASM=1 \
+  -s ALLOW_MEMORY_GROWTH=1 \
+  -s INITIAL_MEMORY="$INITIAL_MEMORY" \
+  -s STACK_SIZE=8MB \
+  --no-entry \
+  -s EXPORTED_FUNCTIONS='["_veridict_verify","_veridict_check_circuit","_veridict_expected_circuit_sha256","_malloc","_free"]'
+
 step "Done"
 ls -la "$OUT_DIR"
