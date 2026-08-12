@@ -19,19 +19,20 @@ Required env vars (for real OAuth):
   REQUIRED_ORG      — only members of this GitHub org get credentials
   BASE_URL          — e.g. http://localhost:8000 (must match GitHub app callback)
   BACKEND_URL       — e.g. http://localhost:8001
-  PROVER_BIN        — path to prover_cli (default ./prover/build/prover_cli)
+  WASM_DIR          — built browser prover (default ./prover/wasm/dist)
+  CIRCUIT_PATH      — cached circuit blob served to the browser
 """
 
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import hmac
+import json
 import os
 import re
 import secrets
-import subprocess
-import tempfile
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -42,10 +43,15 @@ load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"), override=True)
 
 import httpx
-from cryptography.hazmat.primitives.asymmetric import ec
-from fastapi import Cookie, FastAPI, Form, HTTPException, Response
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi import Cookie, FastAPI, File, Form, HTTPException, Response, UploadFile
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+)
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 import db
 from mdoc_builder import (
@@ -80,14 +86,31 @@ def _resolve(path: str) -> str:
     return path if os.path.isabs(path) else os.path.join(_PROJECT_ROOT, path)
 
 
-PROVER_BIN = _resolve(os.environ.get("PROVER_BIN", "./prover/build/prover_cli"))
-# Pre-generated circuit blob. Circuit generation is deterministic per ZK spec and
-# costs ~15 s, so it belongs in a build step, not the approve path.
-CIRCUIT_PATH = _resolve(os.environ.get(
-    "CIRCUIT_PATH",
-    "./prover/circuits/8d079211715200ff06c5109639245502bfe94aa869908d31176aae4016182121",
-))
+# Circuit hash doubles as the asset filename, so the browser can cache it
+# immutably. Proving happens client-side now; the issuer only serves the blob.
+CIRCUIT_HASH = os.environ.get(
+    "CIRCUIT_HASH",
+    "8d079211715200ff06c5109639245502bfe94aa869908d31176aae4016182121",
+)
+CIRCUIT_PATH = _resolve(os.environ.get("CIRCUIT_PATH", f"./prover/circuits/{CIRCUIT_HASH}"))
+WASM_DIR = _resolve(os.environ.get("WASM_DIR", "./prover/wasm/dist"))
 PSEUDONYM_KEY_PATH = _resolve(os.environ.get("PSEUDONYM_KEY_PATH", "./.secrets/pseudonym-key.bin"))
+
+# The claim proved about the credential. Must match the backend's expectation.
+CLAIM_NS = os.environ.get("CLAIM_NS", "org.example.reviewer")
+CLAIM_ID = os.environ.get("CLAIM_ID", "role")
+
+# P-256 field prime, for range-checking device public keys the browser sends.
+_P256_P = 2**256 - 2**224 + 2**192 + 2**96 - 1
+
+
+class CredentialRequest(BaseModel):
+    """Body of POST /approve/credential. The device public key is generated in
+    the browser; the matching private key never leaves it."""
+
+    pr_slug: str
+    device_pk_x: str
+    device_pk_y: str
 
 
 def _load_or_create_pseudonym_key(path: str) -> bytes:
@@ -209,6 +232,33 @@ db.init_db()
 _ASSETS_DIR = _resolve("assets")
 if os.path.isdir(_ASSETS_DIR):
     app.mount("/static", StaticFiles(directory=_ASSETS_DIR), name="static")
+
+# The compiled browser prover (veridict_prover.js + .wasm). Built by
+# prover/wasm/build.sh; the emscripten glue resolves the .wasm relative to its
+# own URL, so both must live under the same prefix.
+if os.path.isdir(WASM_DIR):
+    app.mount("/wasm", StaticFiles(directory=WASM_DIR), name="wasm")
+
+# Browser-side proving scripts (device key handling + worker).
+_BROWSER_JS_DIR = os.path.join(os.path.dirname(__file__), "static")
+if os.path.isdir(_BROWSER_JS_DIR):
+    app.mount("/js", StaticFiles(directory=_BROWSER_JS_DIR), name="js")
+
+
+@app.get("/circuit/{circuit_hash}")
+def circuit_asset(circuit_hash: str) -> Response:
+    """Serves the ZK circuit blob, content-addressed by circuit hash.
+
+    Immutable caching is safe precisely because the filename is the hash: a
+    different circuit is a different URL. Saves re-downloading 316 KB per proof.
+    """
+    if circuit_hash != CIRCUIT_HASH or not os.path.exists(CIRCUIT_PATH):
+        raise HTTPException(404, "unknown circuit")
+    return FileResponse(
+        CIRCUIT_PATH,
+        media_type="application/octet-stream",
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )
 
 
 @app.get("/favicon.svg")
@@ -429,35 +479,43 @@ async def review_load(pr: str, session: str | None = Cookie(default=None)) -> HT
     ))
 
 
-@app.post("/approve", response_class=HTMLResponse)
-async def approve(
-    pr_slug: str = Form(...),
-    reviewed: str = Form(None),
-    comment: str = Form(""),
+@app.post("/approve/credential")
+async def approve_credential(
+    body: CredentialRequest,
     session: str | None = Cookie(default=None),
-) -> HTMLResponse:
-    s = _session_or_redirect(session)
-    if reviewed != "yes":
-        return HTMLResponse(dashboard_page(
-            s["login"], s["role"], s["org"],
-            message="Load the PR and tick 'I've reviewed these changes' before approving.",
-        ), 400)
+) -> JSONResponse:
+    """Issues an MDOC bound to a device key the browser holds.
+
+    This replaced the old server-side proving path entirely. The issuer still
+    gates on org membership and the spec check, but proving now happens in the
+    reviewer's browser, so the issuer never holds the device private key and
+    cannot fabricate an approval.
+    """
+    s = db.get_session(session) if session else None
+    if s is None:
+        return JSONResponse({"error": "not signed in"}, 401)
+
+    def err(msg: str, code: int) -> JSONResponse:
+        return JSONResponse({"error": msg}, code)
+
     try:
-        owner, repo, pr_num, sha = _parse_pr_input(pr_slug)
+        device_pub_x = int(body.device_pk_x, 16)
+        device_pub_y = int(body.device_pk_y, 16)
+    except ValueError:
+        return err("device_pk_x / device_pk_y must be hex", 400)
+    if not (0 < device_pub_x < _P256_P and 0 < device_pub_y < _P256_P):
+        return err("device public key coordinates out of range", 400)
+
+    try:
+        owner, repo, pr_num, sha = _parse_pr_input(body.pr_slug)
     except ValueError as e:
-        return HTMLResponse(dashboard_page(
-            s["login"], s["role"], s["org"],
-            message=f"bad PR input: {e}",
-        ), 400)
+        return err(f"bad PR input: {e}", 400)
 
     # If no SHA in the slug, resolve from GitHub. In dev login there's no
     # access token, so a SHA must be provided directly.
     if sha is None:
         if s["access_token"] == "DEV_NO_TOKEN":
-            return HTMLResponse(dashboard_page(
-                s["login"], s["role"], s["org"],
-                message="dev login: include a SHA, e.g. myorg/myrepo/42/abc123",
-            ), 400)
+            return err("dev login: include a SHA, e.g. myorg/myrepo/42/abc123", 400)
         async with httpx.AsyncClient(timeout=10) as client:
             pr = await client.get(
                 f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_num}",
@@ -465,32 +523,27 @@ async def approve(
                          "Accept": "application/vnd.github+json"},
             )
             if pr.status_code != 200:
-                return HTMLResponse(dashboard_page(
-                    s["login"], s["role"], s["org"],
-                    message=f"GitHub returned {pr.status_code} for {pr_slug}",
-                ), 400)
+                return err(f"GitHub returned {pr.status_code} for {body.pr_slug}", 400)
             sha = pr.json()["head"]["sha"]
 
     pr_key = f"{owner}/{repo}/{pr_num}/{sha}"
     user_id = s.get("user_id", s["login"])
     if db.is_issued(pr_key, user_id):
-        return HTMLResponse(dashboard_page(
-            s["login"], s["role"], s["org"],
-            message="You have already approved this PR — one vote per reviewer per commit.",
-        ), 400)
+        return err(
+            "You have already approved this PR — one vote per reviewer per commit.",
+            409,
+        )
 
     # Re-check authorization at approve time (session org/role may be stale).
     auth = await _authorize_for_repo(s["access_token"], s["login"], owner, repo)
     if auth is None:
-        return HTMLResponse(dashboard_page(
-            s["login"], s["role"], s["org"] or REQUIRED_ORG,
-            message=f"@{s['login']} is not authorized to approve PRs on {owner}/{repo}.",
-        ), 403)
+        return err(
+            f"@{s['login']} is not authorized to approve PRs on {owner}/{repo}.", 403
+        )
     _org, _gh_role, _access_type = auth
     s = {**s, "org": _org, "role": _gh_role, "access_type": _access_type}
 
     role = "maintainer" if s["role"] == "admin" else "reviewer"
-    started = time.monotonic()
 
     # Fetch PR files and re-run spec check server-side (cannot trust client).
     token = s["access_token"]
@@ -509,114 +562,149 @@ async def approve(
     spec_check = await loop.run_in_executor(None, run_spec_check, py_contents)
 
     if not spec_check.get("passed") and not spec_check.get("skipped"):
-        return HTMLResponse(dashboard_page(
-            s["login"], s["role"], s["org"],
-            message=(
-                "Spec check failed — fix mypy and pytest errors before "
-                f"requesting anonymous approval. "
-                f"mypy: {'✓' if spec_check.get('mypy_ok') else '✗'}  "
-                f"pytest: {'✓' if spec_check.get('pytest_ok') else '✗'}"
-            ),
-        ), 422)
+        return err(
+            "Spec check failed — fix mypy and pytest errors before "
+            "requesting anonymous approval. "
+            f"mypy: {'✓' if spec_check.get('mypy_ok') else '✗'}  "
+            f"pytest: {'✓' if spec_check.get('pytest_ok') else '✗'}",
+            422,
+        )
 
-    # 1. Mint MDOC bound to this pr_key
-    device_key = ec.generate_private_key(ec.SECP256R1())
-    mdoc_bytes, transcript = build_mdoc(
+    # Mint an MDOC around the device public key the browser generated. The issuer
+    # never sees the matching private key, so it cannot forge an approval on this
+    # reviewer's behalf. The document comes back with a placeholder device
+    # signature that only the holder can fill in.
+    unsigned = build_mdoc(
         [Attribute("role", role), Attribute("org", s["org"])],
-        issuer_key, device_key, pr_key=pr_key,
+        issuer_key,
+        device_pub_x=device_pub_x,
+        device_pub_y=device_pub_y,
+        pr_key=pr_key,
     )
 
-    # 2. Run prover server-side
     now = (datetime.now(timezone.utc) + timedelta(seconds=30)).strftime(
         "%Y-%m-%dT%H:%M:%SZ"
     )
-    prover_start = time.monotonic()
-    proof_path = await _generate_proof(mdoc_bytes, transcript, role, now)
-    prover_ms = int((time.monotonic() - prover_start) * 1000)
-    proof_size_bytes = os.path.getsize(proof_path)
-
-    # 3. Submit to backend
-    pseudonym = _pseudonym_for(s.get("user_id", s["login"]), pr_key)
+    pseudonym = _pseudonym_for(user_id, pr_key)
     reputation = await _compute_reputation(s)
     if not spec_check.get("skipped"):
         parts = ["mypy ✓", "pytest ✓"] if spec_check.get("has_tests") else ["mypy ✓"]
         if spec_check.get("has_z3"):
             parts.append("z3 ✓")
         reputation["spec_check"] = " · ".join(parts)
-    import json as _json
+
+    # Everything the backend must be able to trust stays here. The browser gets
+    # only what it needs to prove, and posts the proof back with this token.
+    token = secrets.token_urlsafe(24)
+    db.put_ephemeral(f"pending:{token}", {
+        "pr_key": pr_key,
+        "user_id": str(user_id),
+        "login": s["login"],
+        "now": now,
+        "pseudonym": pseudonym,
+        "reputation": reputation,
+        "transcript_hex": unsigned.transcript.hex(),
+        "started": time.time(),
+    }, time.time())
+
+    pkx, pky = issuer_public_key_hex(issuer_key)
+    return JSONResponse({
+        "token": token,
+        "mdoc_b64": base64.b64encode(unsigned.mdoc).decode(),
+        "device_tbs_b64": base64.b64encode(unsigned.device_tbs).decode(),
+        "sig_offset": unsigned.sig_offset,
+        "transcript_hex": unsigned.transcript.hex(),
+        "now": now,
+        "issuer_pkx": pkx,
+        "issuer_pky": pky,
+        "claim_ns": CLAIM_NS,
+        "claim_id": CLAIM_ID,
+        "claim_cbor_hex": _cbor_text_hex(role),
+        "circuit_url": f"/circuit/{CIRCUIT_HASH}",
+        "pr_key": pr_key,
+    })
+
+
+@app.post("/approve/submit")
+async def approve_submit(
+    token: str = Form(...),
+    comment: str = Form(""),
+    prover_ms: int = Form(0),
+    file: UploadFile = File(...),
+    session: str | None = Cookie(default=None),
+) -> JSONResponse:
+    """Accepts a browser-generated proof and forwards it to the backend.
+
+    The proof travels through the issuer rather than straight to the backend so
+    the pseudonym and reputation chips stay server-computed. A browser posting
+    directly could otherwise claim any pseudonym it liked.
+    """
+    s = db.get_session(session) if session else None
+    if s is None:
+        return JSONResponse({"error": "not signed in"}, 401)
+
+    pending = db.pop_ephemeral(f"pending:{token}")
+    if pending is None:
+        return JSONResponse({"error": "unknown or already-used token"}, 400)
+    if pending["user_id"] != str(s.get("user_id", s["login"])):
+        return JSONResponse({"error": "token does not belong to this session"}, 403)
+
+    pr_key = pending["pr_key"]
+    proof_bytes = await file.read()
+    if not proof_bytes:
+        return JSONResponse({"error": "empty proof"}, 400)
+
     async with httpx.AsyncClient(timeout=120) as client:
-        with open(proof_path, "rb") as fh:
-            r = await client.post(
-                f"{BACKEND_URL}/pr/{pr_key}/proofs",
-                files={"file": fh},
-                data={
-                    "now": now, "comment": comment, "pseudonym": pseudonym,
-                    "reputation": _json.dumps(reputation),
-                },
-            )
+        r = await client.post(
+            f"{BACKEND_URL}/pr/{pr_key}/proofs",
+            files={"file": ("proof.bin", proof_bytes)},
+            data={
+                "now": pending["now"],
+                "comment": comment,
+                "pseudonym": pending["pseudonym"],
+                "reputation": json.dumps(pending["reputation"]),
+            },
+        )
         if r.status_code >= 400:
-            return HTMLResponse(dashboard_page(
-                s["login"], s["role"], s["org"],
-                message=f"backend rejected proof: {r.status_code} {r.text}",
-            ), 502)
+            return JSONResponse(
+                {"error": f"backend rejected proof: {r.status_code} {r.text[:300]}"},
+                502,
+            )
         submit = r.json()
-        db.mark_issued(pr_key, user_id)
+        db.mark_issued(pr_key, pending["user_id"])
 
         status = await client.get(f"{BACKEND_URL}/pr/{pr_key}/approvals")
         approvals = status.json()
 
-    os.unlink(proof_path)
-    took_ms = int((time.monotonic() - started) * 1000)
     pkx, _ = issuer_public_key_hex(issuer_key)
-    return HTMLResponse(approve_result_page(
-        login=s["login"],
-        pr_key=pr_key,
-        count=approvals["valid_proofs"],
-        required=approvals["required"],
-        passed=approvals["pass"],
-        proof_hash=submit["proof_hash"],
-        took_ms=took_ms,
-        comment_url=submit.get("comment_url"),
-        circuit_id=submit.get("circuit_id"),
-        proof_size_bytes=proof_size_bytes,
-        transcript_hex=transcript.hex(),
-        prover_ms=prover_ms,
-        issuer_pkx=pkx,
-    ))
+    result_token = secrets.token_urlsafe(24)
+    db.put_ephemeral(f"result:{result_token}", {
+        "login": pending["login"],
+        "pr_key": pr_key,
+        "count": approvals["valid_proofs"],
+        "required": approvals["required"],
+        "passed": approvals["pass"],
+        "proof_hash": submit["proof_hash"],
+        "took_ms": int((time.time() - pending["started"]) * 1000),
+        "comment_url": submit.get("comment_url"),
+        "circuit_id": submit.get("circuit_id"),
+        "proof_size_bytes": len(proof_bytes),
+        "transcript_hex": pending["transcript_hex"],
+        "prover_ms": prover_ms,
+        "issuer_pkx": pkx,
+    }, time.time())
+
+    return JSONResponse({"ok": True, "redirect": f"/approve/result/{result_token}"})
 
 
-async def _generate_proof(
-    mdoc_bytes: bytes, transcript: bytes, role: str, now: str,
-) -> str:
-    pkx, pky = issuer_public_key_hex(issuer_key)
-    # CBOR-encode the role text manually (parser expects raw CBOR bytes).
-    role_cbor_hex = _cbor_text_hex(role)
-    claim = f"org.example.reviewer:role:{role_cbor_hex}"
-
-    with tempfile.NamedTemporaryFile(suffix=".mdoc", delete=False) as mdoc_f:
-        mdoc_f.write(mdoc_bytes)
-        mdoc_path = mdoc_f.name
-    proof_path = tempfile.NamedTemporaryFile(suffix=".proof", delete=False).name
-
-    cmd = [
-        PROVER_BIN,
-        "--mdoc", mdoc_path,
-        "--pkx", pkx, "--pky", pky,
-        "--transcript", transcript.hex(),
-        "--claim", claim,
-        "--now", now,
-        "--out", proof_path,
-    ]
-    if os.path.exists(CIRCUIT_PATH):
-        cmd += ["--circuit", CIRCUIT_PATH]
-    # Run in a thread to keep the event loop unblocked while the prover runs.
-    proc = await asyncio.get_event_loop().run_in_executor(
-        None, lambda: subprocess.run(cmd, capture_output=True, timeout=180),
-    )
-    os.unlink(mdoc_path)
-    if proc.returncode != 0:
-        raise HTTPException(500, f"prover failed: {proc.stderr.decode()[:500]}")
-    return proof_path
+@app.get("/approve/result/{result_token}", response_class=HTMLResponse)
+def approve_result(result_token: str) -> HTMLResponse:
+    r = db.get_ephemeral(f"result:{result_token}")
+    if r is None:
+        return HTMLResponse(
+            dashboard_page("", "", "", message="That result link has expired."), 404
+        )
+    return HTMLResponse(approve_result_page(**r))
 
 
 _PR_URL_RE = re.compile(
@@ -735,15 +823,32 @@ def dev_credential(
 ) -> Response:
     if os.environ.get("DEV_MODE") != "1":
         raise HTTPException(404)
+
+    # Test fixture for scripts/demo.sh, which needs a complete provable MDOC from
+    # a single HTTP call. This is the one place the issuer still generates a
+    # device key, and it is a throwaway: DEV_MODE only, never reachable from the
+    # approval path, where the key is always the browser's. Imported locally so
+    # the dependency does not read as part of the production flow.
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
+    from mdoc_builder import splice_device_signature
+
     device_key = ec.generate_private_key(ec.SECP256R1())
-    mdoc_bytes, transcript = build_mdoc(
+    pub = device_key.public_key().public_numbers()
+    unsigned = build_mdoc(
         [Attribute("role", role), Attribute("org", REQUIRED_ORG)],
-        issuer_key, device_key, pr_key=pr_key,
+        issuer_key, device_pub_x=pub.x, device_pub_y=pub.y, pr_key=pr_key,
+    )
+    der = device_key.sign(unsigned.device_tbs, ec.ECDSA(hashes.SHA256()))
+    r, s = decode_dss_signature(der)
+    mdoc_bytes = splice_device_signature(
+        unsigned, r.to_bytes(32, "big") + s.to_bytes(32, "big")
     )
     return Response(
         content=mdoc_bytes,
         media_type="application/cbor",
-        headers={"X-Transcript-Hex": transcript.hex()},
+        headers={"X-Transcript-Hex": unsigned.transcript.hex()},
     )
 
 

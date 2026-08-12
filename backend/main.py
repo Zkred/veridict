@@ -49,10 +49,11 @@ def _resolve(path: str) -> str:
 VERIFIER_BIN = _resolve(os.environ.get("VERIFIER_BIN", "./prover/build/verifier_cli"))
 # Pre-generated circuit blob. Without it the verifier regenerates the circuit on
 # every attempt (~15 s each, and we try up to three claim values).
-CIRCUIT_PATH = _resolve(os.environ.get(
-    "CIRCUIT_PATH",
-    "./prover/circuits/8d079211715200ff06c5109639245502bfe94aa869908d31176aae4016182121",
-))
+CIRCUIT_HASH = os.environ.get(
+    "CIRCUIT_HASH",
+    "8d079211715200ff06c5109639245502bfe94aa869908d31176aae4016182121",
+)
+CIRCUIT_PATH = _resolve(os.environ.get("CIRCUIT_PATH", f"./prover/circuits/{CIRCUIT_HASH}"))
 ISSUER_URL = os.environ.get("ISSUER_URL", "http://localhost:8000")
 DOC_TYPE = os.environ.get("DOC_TYPE", "org.example.reviewer.v1")
 CLAIM_NS = os.environ.get("CLAIM_NS", "org.example.reviewer")
@@ -72,10 +73,17 @@ async def _github_auth_header() -> dict[str, str]:
 
     Prefers GitHub App installation token (posts as @<app>[bot]) over
     legacy PAT (posts as the human owner of the PAT).
+
+    Returns {} rather than raising when the App is configured but its
+    credentials are rejected. A revoked key or uninstalled App must not turn an
+    already-verified approval into a failed request; see submit_proof.
     """
     if _gh_app is not None:
-        token = await _gh_app.installation_token()
-        return {"Authorization": f"Bearer {token}"}
+        try:
+            token = await _gh_app.installation_token()
+            return {"Authorization": f"Bearer {token}"}
+        except Exception as e:
+            print(f"[github] installation token unavailable: {e}")
     if GITHUB_BOT_TOKEN:
         return {"Authorization": f"Bearer {GITHUB_BOT_TOKEN}"}
     return {}
@@ -94,6 +102,10 @@ class SubmitResponse(BaseModel):
     circuit_id: str | None = None
     proof_size_bytes: int | None = None
     transcript_hex: str | None = None
+    # False when the proof was accepted but the GitHub commit status or comment
+    # could not be pushed, so callers can distinguish "not approved" from
+    # "approved, but the merge gate has not been updated yet".
+    github_ok: bool = True
 
 
 class ApprovalStatus(BaseModel):
@@ -267,6 +279,12 @@ def _run_verifier(proof_path: str, pkx: str, pky: str, transcript_hex: str, now:
         )
         stderr = result.stderr.decode()
         if result.returncode == 0:
+            # With a cached circuit the verifier never logs an `id:` line, because
+            # that only appeared while generating one. The identity is known
+            # up front instead: it is the circuit hash we loaded, which
+            # circuit_tool --check validates against kZkSpecs at build time.
+            if os.path.exists(CIRCUIT_PATH):
+                return True, CIRCUIT_HASH
             m = _CIRCUIT_ID_RE.search(stderr)
             return True, (m.group(1) if m else None)
         print(f"[verifier] claim={claim_val} rc={result.returncode} stderr={stderr[:300]}")
@@ -317,14 +335,26 @@ async def submit_proof(
 
     count = db.add_approval(pr_key, proof_hash, pseudonym)
 
-    await _push_commit_status(owner, repo, sha, count, REQUIRED_APPROVALS)
-
+    # From here on the approval is durable. GitHub is a side effect: pushing the
+    # commit status and posting the comment must not be able to fail the request,
+    # or a GitHub outage would report failure for a vote that has already been
+    # counted, and the reviewer would have no way to tell the difference.
     import json as _json
     try:
         rep_obj = _json.loads(reputation) if reputation else {}
     except Exception:
         rep_obj = {}
-    comment_url = await _post_pr_comment(owner, repo, pr, comment, pseudonym, rep_obj)
+
+    comment_url = None
+    github_ok = True
+    try:
+        await _push_commit_status(owner, repo, sha, count, REQUIRED_APPROVALS)
+        comment_url = await _post_pr_comment(
+            owner, repo, pr, comment, pseudonym, rep_obj
+        )
+    except Exception as e:
+        github_ok = False
+        print(f"[github] side effects failed for {pr_key}: {e}")
 
     return SubmitResponse(
         accepted=True,
@@ -334,6 +364,7 @@ async def submit_proof(
         circuit_id=circuit_id,
         proof_size_bytes=len(body),
         transcript_hex=transcript,
+        github_ok=github_ok,
     )
 
 

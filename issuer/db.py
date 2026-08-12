@@ -38,6 +38,18 @@ def init_db() -> None:
                 PRIMARY KEY (pr_key, user_id)
             )
         """)
+        # Short-lived server-side state for the browser-side proving flow. The
+        # browser proves locally and posts the proof back, so anything the
+        # backend must be able to trust (pseudonym, reputation chips, the
+        # timestamp bound into the proof) is held here rather than round-tripped
+        # through the client where it could be forged.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS ephemeral (
+                key TEXT PRIMARY KEY,
+                data TEXT NOT NULL,
+                ts REAL NOT NULL
+            )
+        """)
     conn.close()
 
 
@@ -107,6 +119,51 @@ def is_issued(pr_key: str, user_id: str | int) -> bool:
         return row is not None
     finally:
         conn.close()
+
+
+def put_ephemeral(key: str, data: dict, ts: float) -> None:
+    conn = _connect()
+    with conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO ephemeral (key, data, ts) VALUES (?, ?, ?)",
+            (key, json.dumps(data), ts),
+        )
+    conn.close()
+
+
+def get_ephemeral(key: str) -> dict | None:
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT data FROM ephemeral WHERE key = ?", (key,)
+        ).fetchone()
+        return json.loads(row[0]) if row else None
+    finally:
+        conn.close()
+
+
+def pop_ephemeral(key: str) -> dict | None:
+    """Single-use read. Used for the credential token so a proving session
+    cannot be replayed."""
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT data FROM ephemeral WHERE key = ?", (key,)
+        ).fetchone()
+        if row is None:
+            return None
+        with conn:
+            conn.execute("DELETE FROM ephemeral WHERE key = ?", (key,))
+        return json.loads(row[0])
+    finally:
+        conn.close()
+
+
+def prune_ephemeral(older_than_ts: float) -> None:
+    conn = _connect()
+    with conn:
+        conn.execute("DELETE FROM ephemeral WHERE ts < ?", (older_than_ts,))
+    conn.close()
 
 
 def mark_issued(pr_key: str, user_id: str | int) -> None:

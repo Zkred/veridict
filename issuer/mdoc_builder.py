@@ -82,14 +82,22 @@ def build_session_transcript(pr_key: str) -> bytes:
     return cbor2.dumps([None, None, handover])
 
 
-def _device_signature(
-    transcript: bytes,
-    doc_type: str,
-    device_namespaces: bytes,
-    device_key: ec.EllipticCurvePrivateKey,
-) -> list:
-    """Builds DeviceAuth.deviceSignature (COSE_Sign1) per ISO 18013-5 §9.1.3.4."""
-    # DeviceAuthentication = ["DeviceAuthentication", SessionTranscript, DocType, DeviceNameSpacesBytes]
+def _cose_sign1_tbs(payload: bytes) -> bytes:
+    """Returns the exact bytes a COSE_Sign1 signature is computed over."""
+    protected = cbor2.dumps({COSE_ALG_LABEL: COSE_ES256})
+    return cbor2.dumps(["Signature1", protected, b"", payload])
+
+
+def _device_auth_tbs(
+    transcript: bytes, doc_type: str, device_namespaces: bytes,
+) -> tuple[bytes, bytes]:
+    """Returns (to_be_signed, payload) for DeviceAuth.deviceSignature.
+
+    Per ISO 18013-5 §9.1.3.4. Note this depends only on the transcript, docType
+    and device namespaces, never on the issuer's signature. That independence is
+    what lets the browser hold the device key: the issuer can build everything
+    else and hand these bytes out to be signed remotely.
+    """
     device_auth = [
         "DeviceAuthentication",
         cbor2.loads(transcript),
@@ -97,22 +105,56 @@ def _device_signature(
         cbor2.CBORTag(24, device_namespaces),
     ]
     payload = cbor2.dumps(cbor2.CBORTag(24, cbor2.dumps(device_auth)))
-    return _cose_sign1(payload, device_key)
+    return _cose_sign1_tbs(payload), payload
+
+
+# A 64-byte all-zero ECDSA signature stands in for the real one until the device
+# signs. CBOR-encoded that is 0x58 0x40 followed by the zeros, which is what we
+# search for to find the splice point.
+_SIG_PLACEHOLDER = b"\x00" * 64
+_SIG_PLACEHOLDER_CBOR = b"\x58\x40" + _SIG_PLACEHOLDER
+
+
+@dataclass
+class UnsignedMdoc:
+    """An MDOC that is complete except for the holder's device signature.
+
+    The issuer produces this without ever seeing the device private key. The
+    holder signs `device_tbs` and overwrites the 64 bytes at `sig_offset`.
+    """
+
+    mdoc: bytes
+    transcript: bytes
+    device_tbs: bytes
+    sig_offset: int
+
+
+def splice_device_signature(unsigned: UnsignedMdoc, raw_sig: bytes) -> bytes:
+    """Inserts a raw 64-byte (r || s) ECDSA signature into the placeholder slot."""
+    if len(raw_sig) != 64:
+        raise ValueError(f"expected a 64-byte raw signature, got {len(raw_sig)}")
+    out = bytearray(unsigned.mdoc)
+    out[unsigned.sig_offset:unsigned.sig_offset + 64] = raw_sig
+    return bytes(out)
 
 
 def build_mdoc(
     attributes: list[Attribute],
     issuer_key: ec.EllipticCurvePrivateKey,
-    device_key: ec.EllipticCurvePrivateKey,
+    device_pub_x: int,
+    device_pub_y: int,
     pr_key: str,
     validity_days: int = 30,
-) -> tuple[bytes, bytes]:
-    """Returns (mdoc_bytes, session_transcript_bytes).
+) -> UnsignedMdoc:
+    """Builds and signs an MDOC around a device public key the issuer does not own.
 
-    The transcript must be passed to `run_mdoc_prover` as the --transcript
-    argument; it's the binding between the credential and the review event.
+    Takes only the device *public* key coordinates, so the holder's private key
+    stays on the holder's device. The returned document carries a placeholder
+    device signature; the holder signs `device_tbs` and splices the result in.
+
+    The transcript must be passed to `run_mdoc_prover` as --transcript; it is the
+    binding between the credential and the review event.
     """
-    """Builds and signs a minimal MDOC. Returns the CBOR-encoded bytes."""
     # 1. Build IssuerSignedItems and their digests for the MSO
     signed_items: list[bytes] = []
     digests: dict[int, bytes] = {}
@@ -124,7 +166,6 @@ def build_mdoc(
     # 2. Build the MSO
     now = dt.datetime.now(dt.timezone.utc).replace(microsecond=0)
     valid_until = now + dt.timedelta(days=validity_days)
-    device_numbers = device_key.public_key().public_numbers()
     mso = {
         "version": "1.0",
         "digestAlgorithm": "SHA-256",
@@ -139,8 +180,8 @@ def build_mdoc(
             "deviceKey": {
                 1: 2,    # kty: EC2
                 -1: 1,   # crv: P-256
-                -2: _coordinate_bytes(device_numbers.x),
-                -3: _coordinate_bytes(device_numbers.y),
+                -2: _coordinate_bytes(device_pub_x),
+                -3: _coordinate_bytes(device_pub_y),
             },
         },
         "docType": DOC_TYPE,
@@ -155,14 +196,21 @@ def build_mdoc(
     mso_payload = cbor2.dumps(cbor2.CBORTag(24, cbor2.dumps(mso)))
     issuer_auth = _cose_sign1(mso_payload, issuer_key)
 
-    # 3. Compute the device signature over the SessionTranscript for this PR.
-    # The Longfellow ZK circuit verifies this against the deviceKey above
-    # using the same transcript passed via --transcript to the prover.
+    # 3. Work out what the device must sign over the SessionTranscript for this
+    # PR, and leave a placeholder in its place. The Longfellow ZK circuit checks
+    # this against the deviceKey above using the same transcript passed via
+    # --transcript to the prover.
     transcript = build_session_transcript(pr_key)
     device_namespaces = cbor2.dumps({})  # no device-side attributes
-    device_signature = _device_signature(
-        transcript, DOC_TYPE, device_namespaces, device_key
+    device_tbs, device_payload = _device_auth_tbs(
+        transcript, DOC_TYPE, device_namespaces
     )
+    device_signature = [
+        cbor2.dumps({COSE_ALG_LABEL: COSE_ES256}),
+        {},
+        device_payload,
+        _SIG_PLACEHOLDER,
+    ]
 
     # 4. Assemble the document
     document = {
@@ -186,7 +234,22 @@ def build_mdoc(
         "documents": [document],
         "status": 0,
     }
-    return cbor2.dumps(response), transcript
+    mdoc = cbor2.dumps(response)
+
+    # Locate the placeholder so the holder can overwrite exactly those 64 bytes.
+    # Assert uniqueness: a second match would mean splicing into the wrong slot.
+    first = mdoc.find(_SIG_PLACEHOLDER_CBOR)
+    if first < 0:
+        raise RuntimeError("device signature placeholder not found in encoded MDOC")
+    if mdoc.find(_SIG_PLACEHOLDER_CBOR, first + 1) >= 0:
+        raise RuntimeError("device signature placeholder is ambiguous")
+
+    return UnsignedMdoc(
+        mdoc=mdoc,
+        transcript=transcript,
+        device_tbs=device_tbs,
+        sig_offset=first + len(_SIG_PLACEHOLDER_CBOR) - 64,
+    )
 
 
 def issuer_public_key_hex(key: ec.EllipticCurvePrivateKey) -> tuple[str, str]:

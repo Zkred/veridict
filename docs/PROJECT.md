@@ -327,10 +327,11 @@ Documented in `docs/mdoc-format-notes.md`. Highlights:
 | Backend | proofs, pseudonyms, approval counts | verify, post bot comments, push status | learn reviewer identities |
 | PR author / GitHub UI | bot comments tagged with pseudonyms + reputation chips, commit status | nothing extra | learn reviewer identities |
 
-Anonymity is **toward the verifier** (CI / PR author / external audit
-trail) — not toward the issuer. A fellowship-stage hardening would push
-proving client-side (browser WASM) so the issuer never sees the device
-key. Captured honestly in the README and the demo writeup.
+Anonymity now holds **toward the verifier and the issuer**. Proving runs in
+the reviewer's browser (WebAssembly) against a device key the issuer never
+sees, so the issuer can attest qualification but cannot produce an approval
+on a reviewer's behalf. The issuer still learns *that* a given reviewer
+requested a credential for a given PR; what it cannot do is vote for them.
 
 ---
 
@@ -341,9 +342,13 @@ key. Captured honestly in the README and the demo writeup.
    pseudonyms. Longfellow doesn't easily expose a nullifier construct.
    Production fix: derive a deterministic blinded ID from
    `(reviewer_secret, pr_key)` inside the circuit so duplicates collide.
-2. **Issuer-held device key.** For demo speed the issuer mints a fresh
-   device key each session. A proper deployment would have the reviewer
-   generate this client-side and send only the device pubkey.
+2. ~~**Issuer-held device key.**~~ **Fixed.** The reviewer's browser generates a
+   non-extractable P-256 key via WebCrypto, keeps it in IndexedDB, and sends only
+   the public coordinates. The issuer signs the MSO around that public key and
+   returns a credential with a placeholder device signature; the browser signs
+   the DeviceAuthentication bytes and proves locally in WebAssembly. The issuer
+   never holds the device private key, so it cannot fabricate an approval.
+   Anonymity is now toward the issuer as well as the verifier.
 3. **Pseudonym key compromise.** If the HMAC secret leaks, pseudonyms
    become enumerable against the org membership list. Store this as
    carefully as any other production secret.

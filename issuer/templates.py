@@ -1552,9 +1552,8 @@ def pr_review_page(user_login: str, owner: str, repo: str, pr_num: int,
             <!-- Approve card -->
             <div class="sidebar-card">
               <h4>Anonymous approval</h4>
-              <form method="post" action="/approve" id="approve-form">
-                <input type="hidden" name="pr_slug" value="{escape(pr_slug_field)}">
-                <input type="hidden" name="reviewed" value="yes">
+              <form id="approve-form" onsubmit="return false">
+                <input type="hidden" name="pr_slug" id="pr-slug" value="{escape(pr_slug_field)}">
                 <label style="font-size:0.8rem;font-weight:500;display:block;margin-bottom:0.3rem">
                   Comment <span style="color:var(--fg-muted);font-weight:400">(optional, posted via bot)</span>
                 </label>
@@ -1564,7 +1563,7 @@ def pr_review_page(user_login: str, owner: str, repo: str, pr_num: int,
                   <input type="checkbox" id="confirm" required {approve_blocked}>
                   I&rsquo;ve reviewed these changes
                 </label>
-                <button class="btn-approve" id="submit-btn" type="submit" disabled {approve_blocked}>
+                <button class="btn-approve" id="submit-btn" type="button" disabled {approve_blocked}>
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                        stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
@@ -1577,7 +1576,8 @@ def pr_review_page(user_login: str, owner: str, repo: str, pr_num: int,
                      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;margin-top:2px">
                   <rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
                 </svg>
-                Generates a Longfellow ZK proof (~30 s). The backend sees only the proof — never your identity.
+                Generates a Longfellow ZK proof in your browser (~5 s). Your device key never
+                leaves this machine, so the issuer cannot approve on your behalf.
               </div>
             </div>
 
@@ -1588,45 +1588,55 @@ def pr_review_page(user_login: str, owner: str, repo: str, pr_num: int,
       <div class="overlay" id="loading-overlay">
         <div class="panel">
           <div class="spinner"></div>
-          <h3>Generating zero-knowledge proof&hellip;</h3>
-          <p class="step-text" id="loading-step">Minting credential</p>
-          <div class="progress-bar"><span id="loading-bar" style="width:5%"></span></div>
+          <h3>Proving in your browser&hellip;</h3>
+          <p class="step-text" id="loading-step">Preparing device key</p>
+          <div class="progress-bar"><span id="loading-bar" style="width:4%"></span></div>
           <p class="meta" style="margin-top:0.75rem">
             Bound to <span class="kbd">{escape(short_sha)}</span>.
-            Compiling Longfellow circuit + generating proof (~30 s).
+            Your device key stays on this machine.
           </p>
+          <p class="meta" id="loading-error"
+             style="margin-top:0.75rem;color:var(--warn);display:none"></p>
         </div>
       </div>
 
-      <script>
+      <script type="module">
+        import {{ runApproval }} from '/js/approve.js';
+
         const cb = document.getElementById('confirm');
         const btn = document.getElementById('submit-btn');
         cb.addEventListener('change', () => {{ btn.disabled = !cb.checked; }});
 
-        const form = document.getElementById('approve-form');
         const overlay = document.getElementById('loading-overlay');
         const stepEl = document.getElementById('loading-step');
         const bar = document.getElementById('loading-bar');
-        const steps = [
-          ['Minting mDL credential',        12],
-          ['Compiling ZK circuit (sig)',     28],
-          ['Compiling ZK circuit (hash)',    52],
-          ['Generating proof witness',       78],
-          ['Submitting proof to backend',    92],
-        ];
-        form.addEventListener('submit', () => {{
+        const errEl = document.getElementById('loading-error');
+
+        // Progress is reported by the worker at real milestones rather than on a
+        // timer, so a stall is visible instead of being papered over.
+        const onProgress = (text, pct) => {{
+          stepEl.textContent = text;
+          if (pct) bar.style.width = pct + '%';
+        }};
+
+        btn.addEventListener('click', async () => {{
+          if (!cb.checked) return;
           overlay.classList.add('active');
           btn.disabled = true;
-          let i = 0;
-          const tick = () => {{
-            if (i < steps.length) {{
-              stepEl.textContent = steps[i][0];
-              bar.style.width = steps[i][1] + '%';
-              i++;
-              setTimeout(tick, 5000);
-            }}
-          }};
-          tick();
+          errEl.style.display = 'none';
+          try {{
+            const res = await runApproval({{
+              prSlug: document.getElementById('pr-slug').value,
+              comment: document.querySelector('textarea[name=comment]').value,
+              onProgress,
+            }});
+            window.location.href = res.redirect;
+          }} catch (e) {{
+            stepEl.textContent = 'Approval failed';
+            errEl.textContent = e.message || String(e);
+            errEl.style.display = 'block';
+            btn.disabled = false;
+          }}
         }});
       </script>
     """, user=user_login)
