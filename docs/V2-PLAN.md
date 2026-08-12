@@ -172,12 +172,48 @@ identicon proxy (DiceBear via wsrv.nl) that the reviewer cards depend on.
      byte** (sha256 `9016d173...`).
    - Shim-built prover to shim-built verifier: OK.
    - Both cross-compatibility directions between shim and OpenSSL builds: OK.
-2. **zstd for wasm.** Portable C, compiles cleanly. Build it as a sub-target
-   rather than relying on an emscripten port.
-3. **`prover/wasm/` emscripten target.** Export `run_mdoc_prover` through an
-   `EMSCRIPTEN_KEEPALIVE` C wrapper. `-O3`, `-sALLOW_MEMORY_GROWTH=1`,
-   `-sMODULARIZE=1`, single-file output. Model the CMake toolchain wiring on the
-   existing `android.sh`, which already solves cross-compilation for this repo.
+2. ~~**zstd for wasm.**~~ **DONE.** Emscripten has no zstd port, so
+   `prover/wasm/build.sh` compiles it from source. Decompress side only: the
+   circuit ships pre-compressed and `mdoc_generate_circuit.cc` (the sole
+   compressor caller) is excluded from the wasm build. Needs
+   `-DZSTD_DISABLE_ASM=1`, since the x86-64 huf_decompress assembly cannot
+   target wasm.
+3. ~~**`prover/wasm/` emscripten target.**~~ **DONE, and it works end to end:
+   a proof generated in WebAssembly verifies against the native verifier.**
+
+   Longfellow's own CMake turned out to be unusable for this. It does
+   `find_package(GTest REQUIRED)` and `find_package(benchmark REQUIRED)` at
+   configure time, and its Darwin branch injects `/opt/homebrew` include and
+   link paths that would leak native libraries into a wasm build. Fortunately
+   the library is header-heavy: only **12 source files** are needed, so
+   `build.sh` compiles them directly rather than fighting the build system.
+
+   | | Native | WASM (node) |
+   |---|---|---|
+   | Prove | 0.47 s | **5.12 s** |
+   | Peak memory | 346 MB RSS | 200 MB heap |
+   | Module size | - | 405 KB wasm + 15 KB JS |
+
+   ~11x native, which is the expected range and comfortably inside what a
+   spinner can cover. It is also *faster than the original hackathon flow*,
+   which spent ~10 s server-side.
+
+   Three findings worth keeping:
+   - **No pthreads needed**, confirmed in practice. So no `SharedArrayBuffer`,
+     so no COOP/COEP headers, so the cross-origin identicon images keep working.
+   - **`-msimd128` is worth it**: 6.24 s to 5.05 s across three runs each, and it
+     shrinks the module from 423955 to 405302 bytes.
+   - **Do not preallocate the heap.** `INITIAL_MEMORY=448MB` measured identically
+     to 64 MB, and held 470 MB where growth peaks at 200 MB.
+
+   One design correction made along the way: validating the fetched circuit via
+   `circuit_id()` cost **3.5 s**, because it decompresses and parses the whole
+   circuit, duplicating what the prover does anyway. Replaced with a SHA-256 of
+   the compressed blob against a digest pinned in `prover_wasm.cc`, which is 2 ms.
+   `build.sh` asserts the pinned digest matches the shipped blob so the two
+   cannot drift. This is a fail-fast UX guard, not a security boundary: the
+   authoritative verifier is server-side, and a proof against the wrong circuit
+   fails there regardless.
 4. **Web Worker + JS glue.** Proving must not block the main thread. The
    existing six-phase stepped loading overlay maps onto worker progress
    messages, so the UI work is mostly rewiring, not redesign.

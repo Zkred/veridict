@@ -68,3 +68,8 @@ scripts/build_slides.js
 docs/demo-frames/
 !docs/Veridict-Slides.pptx
 !docs/Veridict-Slides.pdf
+
+# WASM build outputs
+prover/wasm/obj/
+prover/wasm/dist/
+prover/build-portable/
