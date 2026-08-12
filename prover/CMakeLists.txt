@@ -42,7 +42,7 @@ if(NOT _zstd_target)
   set(_zstd_target ${ZSTD_LIB})
 endif()
 
-foreach(_cli prover_cli verifier_cli)
+foreach(_cli prover_cli verifier_cli circuit_tool)
   add_executable(${_cli} src/${_cli}.cc)
   target_link_libraries(${_cli} PRIVATE
     ${LF_STATIC}

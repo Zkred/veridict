@@ -81,6 +81,12 @@ def _resolve(path: str) -> str:
 
 
 PROVER_BIN = _resolve(os.environ.get("PROVER_BIN", "./prover/build/prover_cli"))
+# Pre-generated circuit blob. Circuit generation is deterministic per ZK spec and
+# costs ~15 s, so it belongs in a build step, not the approve path.
+CIRCUIT_PATH = _resolve(os.environ.get(
+    "CIRCUIT_PATH",
+    "./prover/circuits/8d079211715200ff06c5109639245502bfe94aa869908d31176aae4016182121",
+))
 PSEUDONYM_KEY_PATH = _resolve(os.environ.get("PSEUDONYM_KEY_PATH", "./.secrets/pseudonym-key.bin"))
 
 
@@ -601,7 +607,9 @@ async def _generate_proof(
         "--now", now,
         "--out", proof_path,
     ]
-    # Run in a thread to keep the event loop unblocked during the ~10s compile.
+    if os.path.exists(CIRCUIT_PATH):
+        cmd += ["--circuit", CIRCUIT_PATH]
+    # Run in a thread to keep the event loop unblocked while the prover runs.
     proc = await asyncio.get_event_loop().run_in_executor(
         None, lambda: subprocess.run(cmd, capture_output=True, timeout=180),
     )

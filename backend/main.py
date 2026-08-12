@@ -47,6 +47,12 @@ def _resolve(path: str) -> str:
 
 
 VERIFIER_BIN = _resolve(os.environ.get("VERIFIER_BIN", "./prover/build/verifier_cli"))
+# Pre-generated circuit blob. Without it the verifier regenerates the circuit on
+# every attempt (~15 s each, and we try up to three claim values).
+CIRCUIT_PATH = _resolve(os.environ.get(
+    "CIRCUIT_PATH",
+    "./prover/circuits/8d079211715200ff06c5109639245502bfe94aa869908d31176aae4016182121",
+))
 ISSUER_URL = os.environ.get("ISSUER_URL", "http://localhost:8000")
 DOC_TYPE = os.environ.get("DOC_TYPE", "org.example.reviewer.v1")
 CLAIM_NS = os.environ.get("CLAIM_NS", "org.example.reviewer")
@@ -242,17 +248,20 @@ def _run_verifier(proof_path: str, pkx: str, pky: str, transcript_hex: str, now:
     to_try = list(dict.fromkeys([CLAIM_VALUE_HEX, _MAINTAINER_HEX, _REVIEWER_HEX]))
 
     for claim_val in to_try:
+        cmd = [
+            VERIFIER_BIN,
+            "--proof", proof_path,
+            "--pkx", pkx,
+            "--pky", pky,
+            "--transcript", transcript_hex,
+            "--claim", f"{CLAIM_NS}:{CLAIM_ID}:{claim_val}",
+            "--now", now,
+            "--doctype", DOC_TYPE,
+        ]
+        if os.path.exists(CIRCUIT_PATH):
+            cmd += ["--circuit", CIRCUIT_PATH]
         result = subprocess.run(
-            [
-                VERIFIER_BIN,
-                "--proof", proof_path,
-                "--pkx", pkx,
-                "--pky", pky,
-                "--transcript", transcript_hex,
-                "--claim", f"{CLAIM_NS}:{CLAIM_ID}:{claim_val}",
-                "--now", now,
-                "--doctype", DOC_TYPE,
-            ],
+            cmd,
             capture_output=True,
             timeout=180,
         )

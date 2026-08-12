@@ -63,6 +63,13 @@ std::string get_arg(int argc, char** argv, const std::string& flag) {
   std::exit(2);
 }
 
+std::string get_opt_arg(int argc, char** argv, const std::string& flag) {
+  for (int i = 1; i + 1 < argc; ++i) {
+    if (flag == argv[i]) return argv[i + 1];
+  }
+  return "";
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -78,12 +85,23 @@ int main(int argc, char** argv) {
   auto transcript = hex_decode(transcript_hex);
   RequestedAttribute attr = parse_claim(claim_spec);
 
+  // Prefer a cached circuit blob; see the note in prover_cli.
+  std::string circuit_path = get_opt_arg(argc, argv, "--circuit");
+  std::vector<uint8_t> circuit_blob;
   uint8_t* circuit = nullptr;
   size_t circuit_len = 0;
-  if (generate_circuit(&kZkSpecs[0], &circuit, &circuit_len)
-      != CIRCUIT_GENERATION_SUCCESS) {
-    std::cerr << "circuit generation failed\n";
-    return 3;
+  bool circuit_owned = false;
+  if (!circuit_path.empty()) {
+    circuit_blob = read_file(circuit_path);
+    circuit = circuit_blob.data();
+    circuit_len = circuit_blob.size();
+  } else {
+    if (generate_circuit(&kZkSpecs[0], &circuit, &circuit_len)
+        != CIRCUIT_GENERATION_SUCCESS) {
+      std::cerr << "circuit generation failed\n";
+      return 3;
+    }
+    circuit_owned = true;
   }
 
   auto rc = run_mdoc_verifier(
@@ -96,7 +114,7 @@ int main(int argc, char** argv) {
       doc_type.c_str(),
       &kZkSpecs[0]);
 
-  std::free(circuit);
+  if (circuit_owned) std::free(circuit);
 
   if (rc != MDOC_VERIFIER_SUCCESS) {
     std::cerr << "verification failed: " << rc << "\n";

@@ -10,6 +10,9 @@
 //                            (CBOR text(10) "maintainer")
 //   --now <YYYY-MM-DDTHH:MM:SSZ> : current time (must satisfy validity window)
 //   --out <path>           : write the ZK proof here
+//   --circuit <path>       : optional cached circuit blob (see circuit_tool).
+//                            Omitting it regenerates the circuit, which costs
+//                            ~15 s and should never happen in a request path.
 //
 // Exits 0 on success, non-zero with an MdocProverErrorCode on failure.
 
@@ -90,6 +93,13 @@ std::string get_arg(int argc, char** argv, const std::string& flag) {
   std::exit(2);
 }
 
+std::string get_opt_arg(int argc, char** argv, const std::string& flag) {
+  for (int i = 1; i + 1 < argc; ++i) {
+    if (flag == argv[i]) return argv[i + 1];
+  }
+  return "";
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -105,14 +115,25 @@ int main(int argc, char** argv) {
   auto transcript = hex_decode(transcript_hex);
   RequestedAttribute attr = parse_claim(claim_spec);
 
-  // Generate (or load) the circuit. For a real deployment, cache this on disk
-  // — circuit generation is the slow part. kZkSpecs[0] = 1-attribute circuit.
+  // The circuit is deterministic per ZK spec and takes ~15 s to generate, so
+  // prefer a cached blob (see circuit_tool). Generating inline is the fallback
+  // and should not happen in a request path. kZkSpecs[0] = 1-attribute circuit.
+  std::string circuit_path = get_opt_arg(argc, argv, "--circuit");
+  std::vector<uint8_t> circuit_blob;
   uint8_t* circuit = nullptr;
   size_t circuit_len = 0;
-  auto gen = generate_circuit(&kZkSpecs[0], &circuit, &circuit_len);
-  if (gen != CIRCUIT_GENERATION_SUCCESS) {
-    std::cerr << "circuit generation failed: " << gen << "\n";
-    return 3;
+  bool circuit_owned = false;
+  if (!circuit_path.empty()) {
+    circuit_blob = read_file(circuit_path);
+    circuit = circuit_blob.data();
+    circuit_len = circuit_blob.size();
+  } else {
+    auto gen = generate_circuit(&kZkSpecs[0], &circuit, &circuit_len);
+    if (gen != CIRCUIT_GENERATION_SUCCESS) {
+      std::cerr << "circuit generation failed: " << gen << "\n";
+      return 3;
+    }
+    circuit_owned = true;
   }
 
   uint8_t* proof = nullptr;
@@ -127,7 +148,7 @@ int main(int argc, char** argv) {
       &proof, &proof_len,
       &kZkSpecs[0]);
 
-  std::free(circuit);
+  if (circuit_owned) std::free(circuit);
 
   if (rc != MDOC_PROVER_SUCCESS) {
     std::cerr << "prover failed: " << rc << "\n";

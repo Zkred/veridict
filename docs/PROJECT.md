@@ -190,8 +190,10 @@ permission.
 - **C++ CLIs** wrapping Longfellow's `run_mdoc_prover` and
   `run_mdoc_verifier`. Linked against the single bundled
   `libmdoc_static.a` archive.
-- Prover takes ~10 s per proof; verifier takes ~7 s. Most of that is
-  one-time circuit compilation.
+- With the circuit cached (`prover/circuits/`, loaded via `--circuit`),
+  proving takes ~0.5 s and verifying ~0.8 s. Generating the circuit
+  inline instead costs ~15 s at 1.4 GB peak RSS, which is what the
+  original hackathon build did on every approval.
 - **CMake auto-detects** Longfellow build artifacts and brew prefixes
   (`google-benchmark`, `zstd`, `openssl@3`).
 - **Validation tooling**: `scripts/extract_reference_mdoc.py` pulls a
@@ -411,9 +413,13 @@ cd backend && ../.venv/bin/uvicorn main:app --port 8001
 - The library's main C API (`run_mdoc_prover` / `run_mdoc_verifier`) is
   clean to wrap. The ECDSA / SHA circuits are too low-level for the
   3-day hackathon scope.
-- Circuit compilation is the slow part (~8 s); proof gen and
-  verification are cheap (~800 ms / 500 ms once cached). A production
-  deployment would persist the compiled circuit.
+- Circuit compilation is the slow part and it is worth caching: ~15 s and
+  1.4 GB peak RSS to generate, versus ~0.5 s to prove and ~0.8 s to verify
+  once the blob is loaded from disk. The blob is 316 KB compressed and
+  decompresses to 94 MB. Longfellow ships pre-generated circuits in
+  `lib/circuits/mdoc/circuits/`, named by circuit hash, and our
+  reviewer-namespace patch does not change them: our build regenerates one
+  byte-for-byte. `circuit_tool --check` asserts that.
 - ~360 KB per proof. Storeable in a database; too big for HTTP headers
   or PR comments.
 - Only attributes registered in `kMdocAttributes[]` can be proved.
@@ -442,6 +448,8 @@ secure-program-synthesis-hackathon/
 │   └── gh_app.py              - GitHub App JWT → installation token helper
 ├── prover/
 │   ├── src/{prover_cli,verifier_cli}.cc - Longfellow CLI wrappers
+│   ├── src/circuit_tool.cc    - generate / inspect / validate circuit blobs
+│   ├── circuits/<hash>        - cached circuit, loaded via --circuit
 │   └── CMakeLists.txt         - links libmdoc_static.a + OpenSSL + zstd
 ├── patches/
 │   └── add-reviewer-namespace.patch - registers org.example.reviewer in Longfellow

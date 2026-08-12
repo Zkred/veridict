@@ -63,15 +63,28 @@ else
   echo "    already built"
 fi
 
-step "[4/6] Build our prover_cli / verifier_cli"
+step "[4/7] Build our prover_cli / verifier_cli / circuit_tool"
 cmake -DLONGFELLOW_ROOT="$(realpath "$LF_ROOT")" -S prover -B prover/build
 cmake --build prover/build -j"$(getconf _NPROCESSORS_ONLN || echo 4)"
 
-step "[5/6] Install Python deps (issuer + backend)"
+step "[5/7] Verify the cached circuit blob"
+# Circuit generation is deterministic per ZK spec and costs ~15 s at 1.4 GB peak
+# RSS, so the blob is committed and loaded at runtime instead. It is byte-identical
+# to the one Longfellow ships; this step re-checks that rather than assuming it.
+CIRCUIT_FILE="prover/circuits/8d079211715200ff06c5109639245502bfe94aa869908d31176aae4016182121"
+if [[ -f "$CIRCUIT_FILE" ]]; then
+  ./prover/build/circuit_tool --check "$CIRCUIT_FILE" --spec 0
+else
+  echo "    missing, generating (~15 s)"
+  mkdir -p prover/circuits
+  ./prover/build/circuit_tool --generate --spec 0 --out "$CIRCUIT_FILE"
+fi
+
+step "[6/7] Install Python deps (issuer + backend)"
 python3 -m pip install -q -r issuer/requirements.txt
 python3 -m pip install -q -r backend/requirements.txt
 
-step "[6/6] Run MDOC format validation"
+step "[7/7] Run MDOC format validation"
 LF_ROOT="$LF_ROOT" ./scripts/validate_mdoc_format.sh
 
 echo
