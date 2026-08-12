@@ -297,6 +297,12 @@ Two bugs found and fixed while verifying:
 
 ## Phase 1 outcome
 
+Run `./scripts/validate_v2.sh` to check the whole stack (8 checks, all passing):
+circuit identity, the OpenSSL replacement's byte-exactness, split signing, and
+prover/verifier interop in both directions between native and wasm, plus a
+tampered-proof rejection so a verifier that accepted everything could not pass.
+
+
 **Phase 1 is complete. No native binary is required to run Veridict any more.**
 Proving happens in the reviewer's browser, verification runs the same WASM module
 server-side, and the C++ CLIs are now build-time tooling (`circuit_tool`) and an

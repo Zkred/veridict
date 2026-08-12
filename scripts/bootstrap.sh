@@ -12,7 +12,7 @@ LF_ROOT="${LF_ROOT:-../longfellow-zk}"
 
 step() { printf "\n\033[1;36m==> %s\033[0m\n" "$*"; }
 
-step "[0/7] Install system dependencies"
+step "[0/8] Install system dependencies"
 if [[ "$(uname)" == "Darwin" ]]; then
   if ! command -v brew >/dev/null; then
     echo "    Homebrew not found — install from https://brew.sh first"; exit 1
@@ -31,12 +31,12 @@ else
   exit 1
 fi
 
-step "[1/7] Clone Longfellow (if needed)"
+step "[1/8] Clone Longfellow (if needed)"
 if [[ ! -d "$LF_ROOT" ]]; then
   git clone https://github.com/google/longfellow-zk "$LF_ROOT"
 fi
 
-step "[2/7] Apply patches (if not already applied)"
+step "[2/8] Apply patches (if not already applied)"
 pushd "$LF_ROOT" > /dev/null
 if grep -q kReviewerNamespace lib/circuits/mdoc/mdoc_attribute_ids.h 2>/dev/null; then
   echo "    reviewer-namespace: already applied"
@@ -55,7 +55,7 @@ else
 fi
 popd > /dev/null
 
-step "[3/7] Build Longfellow (Release)"
+step "[3/8] Build Longfellow (Release)"
 CMAKE_EXTRA=()
 if [[ "$(uname)" == "Darwin" ]]; then
   BREW_PREFIX="$(brew --prefix)"
@@ -72,11 +72,11 @@ else
   echo "    already built"
 fi
 
-step "[4/7] Build our prover_cli / verifier_cli / circuit_tool"
+step "[4/8] Build our prover_cli / verifier_cli / circuit_tool"
 cmake -DLONGFELLOW_ROOT="$(realpath "$LF_ROOT")" -S prover -B prover/build
 cmake --build prover/build -j"$(getconf _NPROCESSORS_ONLN || echo 4)"
 
-step "[5/7] Verify the cached circuit blob"
+step "[5/8] Verify the cached circuit blob"
 # Circuit generation is deterministic per ZK spec and costs ~15 s at 1.4 GB peak
 # RSS, so the blob is committed and loaded at runtime instead. It is byte-identical
 # to the one Longfellow ships; this step re-checks that rather than assuming it.
@@ -89,11 +89,28 @@ else
   ./prover/build/circuit_tool --generate --spec 0 --out "$CIRCUIT_FILE"
 fi
 
-step "[6/7] Install Python deps (issuer + backend)"
+step "[6/8] Build the WebAssembly prover/verifier"
+# Required at runtime: the browser proves with this module and the backend
+# verifies with it. Skipped with a warning rather than failing the bootstrap,
+# since the native CLIs still work for CLI-only smoke tests.
+ZSTD_ROOT="${ZSTD_ROOT:-../zstd}"
+if command -v emcc >/dev/null || [[ -d /opt/homebrew/opt/emscripten/libexec ]]; then
+  if [[ ! -d "$ZSTD_ROOT/lib/decompress" ]]; then
+    echo "    cloning zstd sources (needed for the wasm build)"
+    git clone --depth 1 --branch v1.5.6 https://github.com/facebook/zstd.git "$ZSTD_ROOT"
+  fi
+  LF_ROOT="$LF_ROOT" ZSTD_ROOT="$ZSTD_ROOT" ./prover/wasm/build.sh
+else
+  echo "    emscripten not found — skipping."
+  echo "    Install it (brew install emscripten) and run ./prover/wasm/build.sh;"
+  echo "    without it the browser cannot generate proofs."
+fi
+
+step "[7/8] Install Python deps (issuer + backend)"
 python3 -m pip install -q -r issuer/requirements.txt
 python3 -m pip install -q -r backend/requirements.txt
 
-step "[7/7] Run MDOC format validation"
+step "[8/8] Run MDOC format validation"
 LF_ROOT="$LF_ROOT" ./scripts/validate_mdoc_format.sh
 
 echo
