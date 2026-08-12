@@ -165,6 +165,52 @@ int veridict_prove(const uint8_t* circuit, size_t circuit_len,
   return kVeridictOk;
 }
 
+// Verifies a proof. Returns kVeridictOk (0) if the proof is valid, a
+// VeridictError for bad input, or the MdocVerifierErrorCode from the library.
+//
+// Verification must stay server-authoritative: a browser that verified its own
+// proof would be marking its own homework. This export exists so the *server*
+// can run the verifier as WebAssembly instead of as a native binary, which is
+// what makes a deployment without compiled artifacts possible. Same module, two
+// consumers, one toolchain.
+EMSCRIPTEN_KEEPALIVE
+int veridict_verify(const uint8_t* circuit, size_t circuit_len,
+                    const uint8_t* proof, size_t proof_len,
+                    const char* pkx, const char* pky,
+                    const uint8_t* transcript, size_t transcript_len,
+                    const char* claim_ns, const char* claim_id,
+                    const uint8_t* claim_cbor, size_t claim_cbor_len,
+                    const char* now, const char* doc_type) {
+  if (circuit == nullptr || proof == nullptr || pkx == nullptr ||
+      pky == nullptr || transcript == nullptr || claim_ns == nullptr ||
+      claim_id == nullptr || claim_cbor == nullptr || now == nullptr ||
+      doc_type == nullptr) {
+    return kVeridictBadArgs;
+  }
+
+  RequestedAttribute attr{};
+  size_t ns_len = std::strlen(claim_ns);
+  size_t id_len = std::strlen(claim_id);
+  if (ns_len > sizeof(attr.namespace_id) || id_len > sizeof(attr.id) ||
+      claim_cbor_len > sizeof(attr.cbor_value)) {
+    return kVeridictClaimTooLong;
+  }
+  std::memcpy(attr.namespace_id, claim_ns, ns_len);
+  std::memcpy(attr.id, claim_id, id_len);
+  std::memcpy(attr.cbor_value, claim_cbor, claim_cbor_len);
+  attr.namespace_len = ns_len;
+  attr.id_len = id_len;
+  attr.cbor_value_len = claim_cbor_len;
+
+  if (!veridict_check_circuit(circuit, circuit_len)) {
+    return kVeridictCircuitMismatch;
+  }
+
+  return static_cast<int>(run_mdoc_verifier(
+      circuit, circuit_len, pkx, pky, transcript, transcript_len, &attr,
+      /*attrs_len=*/1, now, proof, proof_len, doc_type, &kZkSpecs[0]));
+}
+
 EMSCRIPTEN_KEEPALIVE
 void veridict_free(uint8_t* p) { std::free(p); }
 

@@ -187,9 +187,14 @@ permission.
 
 ### Prover / Verifier
 
+- **WebAssembly module** (`prover/wasm/`) exporting both prover and verifier,
+  built with `build.sh` from 12 Longfellow sources plus zstd, with no OpenSSL
+  (see `patches/portable-crypto.patch`). The browser proves with it; the backend
+  verifies with it via `verify.cjs`. No native binary is needed at runtime.
 - **C++ CLIs** wrapping Longfellow's `run_mdoc_prover` and
-  `run_mdoc_verifier`. Linked against the single bundled
-  `libmdoc_static.a` archive.
+  `run_mdoc_verifier`, linked against the bundled `libmdoc_static.a`. Now
+  build-time tooling and an optional fast path rather than a dependency;
+  `circuit_tool` generates and validates the cached circuit.
 - With the circuit cached (`prover/circuits/`, loaded via `--circuit`),
   proving takes ~0.5 s and verifying ~0.8 s. Generating the circuit
   inline instead costs ~15 s at 1.4 GB peak RSS, which is what the

@@ -164,7 +164,7 @@ em++ "${CFLAGS_COMMON[@]}" -std=c++17 -DLONGFELLOW_PORTABLE_CRYPTO=1 \
   -s ALLOW_MEMORY_GROWTH=1 \
   -s INITIAL_MEMORY="$INITIAL_MEMORY" \
   -s STACK_SIZE=8MB \
-  -s EXPORTED_FUNCTIONS='["_veridict_prove","_veridict_free","_veridict_check_circuit","_veridict_check_circuit_id","_veridict_expected_circuit_hash","_veridict_expected_circuit_sha256","_veridict_num_attributes","_malloc","_free"]' \
+  -s EXPORTED_FUNCTIONS='["_veridict_prove","_veridict_verify","_veridict_free","_veridict_check_circuit","_veridict_check_circuit_id","_veridict_expected_circuit_hash","_veridict_expected_circuit_sha256","_veridict_num_attributes","_malloc","_free"]' \
   -s EXPORTED_RUNTIME_METHODS='["ccall","cwrap","HEAPU8","getValue","setValue","UTF8ToString","lengthBytesUTF8","stringToUTF8"]' \
   -s ENVIRONMENT=web,worker,node \
   -s EXIT_RUNTIME=0

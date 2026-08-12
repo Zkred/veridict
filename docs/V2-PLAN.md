@@ -228,9 +228,21 @@ identicon proxy (DiceBear via wsrv.nl) that the reviewer cards depend on.
    `prover/circuits/8d0792...` (316 KB, upstream-identical) with immutable cache
    headers. The browser fetches it once and caches it forever, since the filename
    is the circuit hash.
-6. **Server-side verification via the same WASM module** inside a Node
-   function. One toolchain, two consumers, and the trust property holds because
-   the server controls which module it runs.
+6. ~~**Server-side verification via the same WASM module.**~~ **DONE.**
+   `veridict_verify` is exported from the same module the browser proves with,
+   for **+31 KB** of wasm, so one build serves both consumers.
+   `prover/wasm/verify.cjs` is a drop-in replacement for `verifier_cli`: same
+   flags, same exit codes (0 valid, 5 invalid), `OK` on stdout. The backend
+   prefers it automatically and falls back to the native binary only if node is
+   unavailable.
+
+   Verification stays server-authoritative. The browser has the verify export
+   too, but a client verifying its own proof would prove nothing; what matters is
+   that the *server* no longer needs a compiled artifact.
+
+   Verified end to end with the native verifier binary moved out of the way:
+   browser prove 5.8 s, **wasm verify 3.4 s** (native was 1.8 s, so roughly 2x,
+   and nowhere near the 300 s function limit).
 7. ~~**Client-side device key.**~~ **DONE, cut over in one go.** No server-side
    proving path remains.
 
@@ -282,6 +294,24 @@ Two bugs found and fixed while verifying:
   is a better source than log scraping.
 
 ---
+
+## Phase 1 outcome
+
+**Phase 1 is complete. No native binary is required to run Veridict any more.**
+Proving happens in the reviewer's browser, verification runs the same WASM module
+server-side, and the C++ CLIs are now build-time tooling (`circuit_tool`) and an
+optional fast path rather than a dependency.
+
+Remaining native-only step: `circuit_tool --generate`, which produces the circuit
+blob. That is a build step run once, not a request path, and its output is
+committed.
+
+Note for Phase 2: the backend currently shells out to `node verify.cjs`. A Python
+function that can spawn node is not something to assume on a serverless host, so
+the deployable form is either a **Node backend function** loading the module
+in-process (no subprocess at all, and the cleaner end state) or `wasmtime-py`
+running a standalone WASI build. Decide this while doing Phase 2 rather than
+assuming the subprocess works.
 
 ## Phase 2: Vercel deployment
 

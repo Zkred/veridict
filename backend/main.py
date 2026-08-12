@@ -20,6 +20,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 from datetime import datetime, timedelta, timezone
@@ -47,6 +48,14 @@ def _resolve(path: str) -> str:
 
 
 VERIFIER_BIN = _resolve(os.environ.get("VERIFIER_BIN", "./prover/build/verifier_cli"))
+# WebAssembly verifier, run under node. Preferred over the native binary because
+# it needs no compiled artifact, which is what allows deployment to a host that
+# cannot build C++. Same flags and exit-code convention as verifier_cli.
+#
+# Verification stays server-side either way: this is the same module the browser
+# uses to prove, but the browser verifying its own proof would prove nothing.
+WASM_VERIFIER = _resolve(os.environ.get("WASM_VERIFIER", "./prover/wasm/verify.cjs"))
+NODE_BIN = os.environ.get("NODE_BIN", "node")
 # Pre-generated circuit blob. Without it the verifier regenerates the circuit on
 # every attempt (~15 s each, and we try up to three claim values).
 CIRCUIT_HASH = os.environ.get(
@@ -253,15 +262,33 @@ async def _push_commit_status(owner: str, repo: str, sha: str,
         print(f"[status-push] exception: {e}")
 
 
+def _verifier_command() -> list[str] | None:
+    """The verifier to invoke, preferring WebAssembly over the native binary.
+
+    Returns None when neither is available, so callers can fail loudly rather
+    than silently accepting proofs.
+    """
+    if os.path.exists(WASM_VERIFIER) and shutil.which(NODE_BIN):
+        return [NODE_BIN, WASM_VERIFIER]
+    if os.path.exists(VERIFIER_BIN):
+        return [VERIFIER_BIN]
+    return None
+
+
 def _run_verifier(proof_path: str, pkx: str, pky: str, transcript_hex: str, now: str) -> tuple[bool, str | None]:
-    """Returns (ok, circuit_id). circuit_id is parsed from verifier stderr on success."""
+    """Returns (ok, circuit_id)."""
+    base = _verifier_command()
+    if base is None:
+        print("[verifier] no verifier available (checked "
+              f"{WASM_VERIFIER} and {VERIFIER_BIN})")
+        return False, None
+
     _MAINTAINER_HEX = "6a6d61696e7461696e6572"
     _REVIEWER_HEX = "687265766965776572"
     to_try = list(dict.fromkeys([CLAIM_VALUE_HEX, _MAINTAINER_HEX, _REVIEWER_HEX]))
 
     for claim_val in to_try:
-        cmd = [
-            VERIFIER_BIN,
+        cmd = base + [
             "--proof", proof_path,
             "--pkx", pkx,
             "--pky", pky,
