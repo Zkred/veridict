@@ -118,10 +118,13 @@ class SubmitResponse(BaseModel):
     circuit_id: str | None = None
     proof_size_bytes: int | None = None
     transcript_hex: str | None = None
-    # False when the proof was accepted but the GitHub commit status or comment
-    # could not be pushed, so callers can distinguish "not approved" from
-    # "approved, but the merge gate has not been updated yet".
-    github_ok: bool = True
+    # Whether the GitHub merge gate actually moved for this submission.
+    #   True  — commit status pushed
+    #   False — attempted and failed (no credential, revoked key, API error)
+    #   None  — not attempted (duplicate proof; nothing changed to push)
+    # Defaulting to True would report success on every path that never tried,
+    # telling a reviewer the gate advanced when it did not.
+    github_ok: bool | None = None
 
 
 class ApprovalStatus(BaseModel):
@@ -237,11 +240,18 @@ async def _post_pr_comment(
 
 
 async def _push_commit_status(owner: str, repo: str, sha: str,
-                              count: int, required: int) -> None:
-    """Push a zk-review-gate commit status to GitHub via the bot identity."""
+                              count: int, required: int) -> bool:
+    """Push a zk-review-gate commit status to GitHub via the bot identity.
+
+    Returns whether the status was actually pushed. A missing or rejected
+    credential is not an error here, but it must not read as success: the merge
+    gate on GitHub is then simply not updated, and the caller reports that via
+    SubmitResponse.github_ok.
+    """
     auth = await _github_auth_header()
     if not auth:
-        return
+        print("[status-push] no GitHub credential; merge gate not updated")
+        return False
     state = "success" if count >= required else "pending"
     description = (
         f"{count} / {required} anonymous reviewers approved"
@@ -265,8 +275,11 @@ async def _push_commit_status(owner: str, repo: str, sha: str,
             )
             if r.status_code >= 400:
                 print(f"[status-push] {r.status_code}: {r.text[:200]}")
+                return False
+            return True
     except Exception as e:
         print(f"[status-push] exception: {e}")
+        return False
 
 
 def _verifier_command() -> list[str] | None:
@@ -417,9 +430,13 @@ async def submit_proof(
         rep_obj = {}
 
     comment_url = None
-    github_ok = True
+    github_ok = False
     try:
-        await _push_commit_status(owner, repo, sha, count, REQUIRED_APPROVALS)
+        # github_ok tracks whether the merge gate on GitHub actually moved, not
+        # merely whether this code raised. An unconfigured or revoked credential
+        # pushes nothing, and reporting that as success would tell the reviewer
+        # the gate advanced when it did not.
+        github_ok = await _push_commit_status(owner, repo, sha, count, REQUIRED_APPROVALS)
         comment_url = await _post_pr_comment(
             owner, repo, pr, comment, pseudonym, rep_obj
         )
