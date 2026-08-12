@@ -1,0 +1,20 @@
+# Keep the deployment bundle to what the services actually need at runtime.
+# prover/wasm/dist and prover/circuits are required (see vercel.json includeFiles).
+
+docs/
+assets/*.pptx
+.validate/
+.playwright-mcp/
+.mypy_cache/
+.secrets/
+patches/
+scripts/
+prover/src/
+prover/tests/
+prover/build/
+prover/wasm/obj/
+*.db
+*.db-wal
+*.db-shm
+*.pem
+.venv/

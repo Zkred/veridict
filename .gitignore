@@ -69,7 +69,8 @@ docs/demo-frames/
 !docs/Veridict-Slides.pptx
 !docs/Veridict-Slides.pdf
 
-# WASM build outputs
+# WASM build intermediates. dist/ is deliberately NOT ignored: the built module
+# is required at runtime and Vercel cannot run emscripten at build time, so the
+# artifacts are committed. prover/wasm/build.sh regenerates them deterministically.
 prover/wasm/obj/
-prover/wasm/dist/
 prover/build-portable/

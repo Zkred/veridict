@@ -114,15 +114,39 @@ class CredentialRequest(BaseModel):
 
 
 def _load_or_create_pseudonym_key(path: str) -> bytes:
-    """32-byte HMAC key, persisted on disk so pseudonyms stay stable
-    across restarts but cannot be derived by outsiders."""
+    """32-byte HMAC key for per-PR pseudonyms.
+
+    PSEUDONYM_KEY_B64 wins over the file, because this key must be *stable*: it
+    is what makes a reviewer's pseudonym consistent within a PR. A serverless
+    instance that generated its own would hand the same reviewer a different
+    pseudonym per request, which reads as several reviewers approving. So
+    generation is a local-development convenience only, and a read-only
+    filesystem is an error rather than a silent fresh key.
+    """
+    b64 = os.environ.get("PSEUDONYM_KEY_B64", "").strip()
+    if b64:
+        key = base64.b64decode(b64, validate=True)
+        if len(key) != 32:
+            raise RuntimeError(
+                f"PSEUDONYM_KEY_B64 decodes to {len(key)} bytes, expected 32"
+            )
+        return key
+
     if os.path.exists(path):
         return open(path, "rb").read()
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+
     key = secrets.token_bytes(32)
-    with open(path, "wb") as fh:
-        fh.write(key)
-    os.chmod(path, 0o600)
+    try:
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        with open(path, "wb") as fh:
+            fh.write(key)
+        os.chmod(path, 0o600)
+    except OSError as e:
+        raise RuntimeError(
+            f"No pseudonym key: PSEUDONYM_KEY_B64 is unset and {path} is not "
+            f"writable ({e}). Set PSEUDONYM_KEY_B64 to 32 base64-encoded bytes. "
+            "A per-instance key would make one reviewer look like many."
+        ) from e
     return key
 
 

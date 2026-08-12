@@ -321,19 +321,47 @@ assuming the subprocess works.
 
 ## Phase 2: Vercel deployment
 
-1. **Two Vercel projects, not one.** Keep the issuer and backend as separate
-   deployments. Collapsing them into one function would let a single process see
-   both reviewer identity and submitted proofs, which quietly destroys the
-   property the whole project is arguing for.
-2. **State to a managed store.** `issuer/db.py` and `backend/db.py` are already
-   clean SQLite wrappers with narrow interfaces (`is_issued`, `mark_issued`,
-   `proof_exists`), so this is a driver swap behind the same functions. Pick the
-   provider via Vercel Marketplace discovery at implementation time rather than
-   hardcoding one now.
-3. **Secrets to env vars.** `.secrets/app-private-key.pem` and
-   `pseudonym-key.bin` become base64 env vars. The `_resolve()` path helper in
-   both servers exists only to cope with relative paths on a local filesystem
-   and can be deleted.
+**Verifier shape: decided and done.** The open question was whether a Python
+function could reach the verifier. Answer: it does not need to leave the process.
+The module is built a second time with `-sSTANDALONE_WASM`, which targets WASI
+and needs only five WASI calls plus `env.emscripten_notify_memory_growth` (a
+no-op), so `wasmtime` runs it inside the backend. No node, no subprocess, no
+compiled binary. `backend/wasm_verifier.py`; **2.5 s**, faster than via node
+(3.4 s). Verified with both the native binary removed and `NODE_BIN` pointed at
+nothing.
+
+One trap worth recording: a standalone module built `--no-entry` is a WASI
+*reactor*, so the host must call the exported `_initialize` to run C++ static
+initialisers. Skipping it does not fail loudly — Longfellow's global field
+objects are left zeroed and valid proofs get rejected with
+`MDOC_VERIFIER_INVALID_INPUT`.
+
+1. ~~**Two Vercel projects, not one.**~~ **DONE.** `api/index.py` serves either
+   role, selected by `VERIDICT_ROLE`. Deploying twice from the same root with
+   different environment variables is what keeps the boundary: the issuer project
+   holds `ISSUER_KEY_B64` and `PSEUDONYM_KEY_B64` but not the GitHub App key, and
+   the backend the reverse. One function holding both would put reviewer identity
+   and submitted proofs in the same process.
+2. ~~**State to a managed store.**~~ **DONE.** Both `db.py` modules run on
+   SQLite locally and Postgres when `DATABASE_URL` is set (Neon via the
+   Marketplace is the recommended provisioning path — it injects the variable).
+   Queries are written once in SQLite dialect; `_sql` rewrites placeholders and
+   the upsert helpers pick per-dialect syntax.
+
+   Verified against a real Postgres in Docker, not just SQLite:
+   `scripts/validate_db.py` exercises all 22 store behaviours on both, including
+   that a resubmitted proof does not inflate the approval count. The full browser
+   approval flow then ran end to end on Postgres with no SQLite files present.
+3. ~~**Secrets to env vars.**~~ **DONE.** `ISSUER_KEY_B64`,
+   `PSEUDONYM_KEY_B64`, `GITHUB_APP_PRIVATE_KEY_B64`, each taking precedence over
+   its file path.
+
+   The subtle part is failure behaviour. Both issuer keys previously
+   *generated and persisted* when absent, which on a read-only serverless
+   filesystem would either crash or, worse, mint a fresh key per instance: a
+   rotating issuer key invalidates every credential already issued, and a
+   rotating pseudonym key makes one reviewer look like several. Both now raise
+   with an explanation instead.
 4. **Move the spec gate to GitHub Actions.** This is the important one, and it
    is a security fix rather than a porting convenience. Today `spec_checker.py`
    runs `mypy`, `pytest`, and Z3 on AI-generated code via subprocess. On Vercel
@@ -346,6 +374,28 @@ assuming the subprocess works.
    CI without bloating a function bundle, and Phase 5 gets a forge-native place
    for the gate to live.
 5. Point `veridict.zkred.tech` at the new deployment. It currently returns 503.
+
+### Verified so far
+
+The full browser approval flow runs in the exact deployment shape — `api/index.py`
+entrypoint, both roles, secrets from environment variables, state in Postgres,
+verification in-process via wasmtime — reaching **2 / 2, merge gate green**.
+Nothing native, nothing on disk.
+
+Note `prover/wasm/dist` is deliberately committed rather than gitignored: the
+built module is needed at runtime and Vercel cannot run emscripten at build time.
+`build.sh` regenerates it deterministically, and the pinned-digest check keeps it
+honest.
+
+### Still open
+
+- **Task 4, the spec gate.** Untouched, and it is the one item that is a genuine
+  security fix rather than a porting concern. Needs a workflow in each reviewed
+  repository plus Checks API verification in the issuer, so it is a cross-repo
+  change, not a local one.
+- **Provisioning and deploying.** Creating the Neon database, the two Vercel
+  projects, and pointing the domain all act on a real account, so they need an
+  explicit go-ahead.
 
 ### Acceptance criteria
 

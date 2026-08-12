@@ -11,6 +11,7 @@ The structure follows ISO 18013-5 section 8 (CBOR encoding), specifically:
 
 from __future__ import annotations
 
+import base64
 import datetime as dt
 import hashlib
 import os
@@ -259,17 +260,38 @@ def issuer_public_key_hex(key: ec.EllipticCurvePrivateKey) -> tuple[str, str]:
 
 
 def load_or_create_issuer_key(path: str) -> ec.EllipticCurvePrivateKey:
-    """Loads a P-256 issuer key from PEM, or generates and persists one."""
+    """Loads the P-256 issuer key from env or PEM, generating one only locally.
+
+    ISSUER_KEY_B64 (base64 PEM) wins, because a serverless deployment cannot
+    persist a generated key: each instance would sign with a different identity
+    and every previously issued credential would stop verifying. Generation is
+    therefore only a local-development convenience, and it fails loudly rather
+    than silently minting a fresh identity when the filesystem is read-only.
+    """
+    b64 = os.environ.get("ISSUER_KEY_B64", "").strip()
+    if b64:
+        return serialization.load_pem_private_key(
+            base64.b64decode(b64, validate=True), password=None
+        )
+
     if os.path.exists(path):
         with open(path, "rb") as fh:
             return serialization.load_pem_private_key(fh.read(), password=None)
+
     key = ec.generate_private_key(ec.SECP256R1())
-    with open(path, "wb") as fh:
-        fh.write(
-            key.private_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PrivateFormat.PKCS8,
-                encryption_algorithm=serialization.NoEncryption(),
-            )
-        )
+    pem = key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+    try:
+        with open(path, "wb") as fh:
+            fh.write(pem)
+    except OSError as e:
+        raise RuntimeError(
+            f"No issuer key: ISSUER_KEY_B64 is unset and {path} is not writable "
+            f"({e}). Set ISSUER_KEY_B64 to a base64-encoded PEM. Generating a "
+            "throwaway key per instance would invalidate every credential "
+            "already issued."
+        ) from e
     return key

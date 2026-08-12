@@ -8,6 +8,7 @@ expiry. The installation token authorizes API calls as the bot user
 
 from __future__ import annotations
 
+import base64
 import os
 import time
 from datetime import datetime, timezone
@@ -18,11 +19,10 @@ import jwt
 
 
 class GitHubApp:
-    def __init__(self, app_id: str, private_key_path: str, installation_id: str):
+    def __init__(self, app_id: str, private_key: bytes, installation_id: str):
         self.app_id = app_id
         self.installation_id = installation_id
-        with open(private_key_path, "rb") as fh:
-            self._private_key = fh.read()
+        self._private_key = private_key
         self._token: Optional[str] = None
         self._token_exp: float = 0.0
 
@@ -66,15 +66,36 @@ def _resolve(path: str) -> str:
     return os.path.join(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")), path)
 
 
+def _load_private_key() -> Optional[bytes]:
+    """The App private key, from env or from disk.
+
+    GITHUB_APP_PRIVATE_KEY_B64 takes precedence: a serverless deployment has no
+    place to put a .pem, so the key travels as a base64 env var. The file path
+    remains for local development.
+    """
+    b64 = os.environ.get("GITHUB_APP_PRIVATE_KEY_B64", "").strip()
+    if b64:
+        try:
+            return base64.b64decode(b64, validate=True)
+        except Exception as e:
+            print(f"[github] GITHUB_APP_PRIVATE_KEY_B64 is not valid base64: {e}")
+            return None
+    key_path = _resolve(os.environ.get("GITHUB_APP_PRIVATE_KEY_PATH", "").strip())
+    if key_path and os.path.exists(key_path):
+        with open(key_path, "rb") as fh:
+            return fh.read()
+    return None
+
+
 def get_app() -> Optional[GitHubApp]:
     """Returns the singleton App if configured, else None."""
     global _singleton
     if _singleton is not None:
         return _singleton
     app_id = os.environ.get("GITHUB_APP_ID", "").strip()
-    key_path = _resolve(os.environ.get("GITHUB_APP_PRIVATE_KEY_PATH", "").strip())
     inst_id = os.environ.get("GITHUB_APP_INSTALLATION_ID", "").strip()
-    if not (app_id and key_path and inst_id and os.path.exists(key_path)):
+    private_key = _load_private_key()
+    if not (app_id and inst_id and private_key):
         return None
-    _singleton = GitHubApp(app_id, key_path, inst_id)
+    _singleton = GitHubApp(app_id, private_key, inst_id)
     return _singleton
