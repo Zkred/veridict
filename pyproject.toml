@@ -1,0 +1,37 @@
+# Deployment manifest. Vercel's Python builder uses uv and requires a [project]
+# table here; requirements.txt files remain for local development.
+#
+# Deliberately absent: mypy, pytest, z3-solver. The deployed issuer runs with
+# SPEC_GATE_MODE=ci-required, so the formal gate is read from the reviewed
+# repository's CI rather than executed in-process. Installing the checkers here
+# would re-enable the in-process fallback, which executes attacker-influenced PR
+# code inside the function that holds the signing key. See issuer/spec_gate.py.
+[project]
+name = "veridict"
+version = "2.0.0"
+description = "ZK-attested spec-driven code review"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.0",
+    "httpx>=0.27.2",
+    "python-multipart>=0.0.10",
+    "pydantic>=2.11.0",
+    "cbor2>=5.6.4",
+    "cryptography>=43.0.1",
+    "python-dotenv>=1.0.0",
+    "pyjwt[crypto]>=2.9.0",
+    # Claude API, for spec-driven synthesis (issuer role only).
+    "anthropic>=0.40.0",
+    # In-process WebAssembly proof verification (backend role only): no native
+    # binary and no node subprocess. See backend/wasm_verifier.py.
+    "wasmtime>=25.0.0",
+    # DATABASE_URL is injected by the Neon Marketplace integration.
+    "psycopg[binary]>=3.2.0",
+]
+
+# api/index.py resolves its ASGI app from the VERIDICT_ROLE environment variable.
+# Vercel's Python builder statically analyses the entrypoint for a top-level
+# `app`, and a conditional import is invisible to that analysis — naming
+# `api.index:app` makes it import the module and read the attribute at runtime.
+[tool.vercel]
+entrypoint = "api.index:app"

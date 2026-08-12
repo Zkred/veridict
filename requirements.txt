@@ -8,6 +8,8 @@ python-multipart>=0.0.10
 pydantic>=2.11.0
 cbor2>=5.6.4
 cryptography>=43.0.1
+# Claude API, for spec-driven synthesis (issuer role).
+anthropic>=0.40.0
 python-dotenv>=1.0.0
 pyjwt[crypto]>=2.9.0
 # Proof verification, in-process. No native binary and no node subprocess.

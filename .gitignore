@@ -74,3 +74,4 @@ docs/demo-frames/
 # artifacts are committed. prover/wasm/build.sh regenerates them deterministically.
 prover/wasm/obj/
 prover/build-portable/
+.vercel

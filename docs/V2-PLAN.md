@@ -387,7 +387,59 @@ objects are left zeroed and valid proofs get rejected with
    This also unblocks later phases: Phase 4 can install Dafny or crosshair in CI
    without bloating a function bundle, and Phase 5 gets a forge-native home for
    the gate.
-5. Point `veridict.zkred.tech` at the new deployment. It currently returns 503.
+5. **Deployed** (2026-08-12). Two Vercel projects, both live and publicly reachable:
+
+   | | URL |
+   |---|---|
+   | Issuer | `https://veridict-issuer.vercel.app` |
+   | Backend | `https://veridict-backend.vercel.app` |
+
+   Verified in production: all issuer routes serve (including `/wasm/*`, `/circuit/<hash>`
+   with its immutable cache header, and `/js/approve.js`), the issuer's public key
+   matches the local key, and a junk proof posted to the backend was **rejected by
+   wasmtime running inside the Vercel function** — so the standalone module, the
+   circuit blob, and the in-process verifier all work on serverless with no native
+   binary. `/dev/login` returns 404, so the auth bypass is not exposed.
+
+   Four things the platform forced, worth recording:
+   - **`pyproject.toml` is required**, not optional. The builder statically analyses
+     the entrypoint for a top-level `app` and cannot see through `api/index.py`'s
+     role switch, so the entrypoint is named explicitly as `api.index:app`. Adding
+     the file switches dependency installation to `uv`, which then demands a
+     `[project]` table — so dependencies are declared there too.
+   - **No catch-all rewrite.** The builder mounts the ASGI app at the root. The
+     original `"/(.*)" -> "/api/index"` rewrite handed FastAPI the literal path
+     `/api/index`, which matches no route, so *every* URL returned 404 while the app
+     was in fact healthy.
+   - **SSO deployment protection is on by default** and returned 302 to a Vercel
+     login for every request. Disabled per project (`vercel project protection
+     disable <project> --sso`), since reviewers and GitHub must reach these.
+   - **mypy/pytest/z3 are deliberately not installed**, and the deployed issuer runs
+     `SPEC_GATE_MODE=ci-required`. Installing them would re-enable the in-process
+     fallback that executes attacker-influenced PR code in the function holding the
+     signing key. Consequence: approvals are blocked until a reviewed repository
+     adopts `templates/veridict-spec-gate.yml`.
+
+### Outstanding, and why
+
+- **Postgres.** Neon requires accepting its marketplace terms (EULA + privacy
+  policy) in a browser — a legal agreement, so it was left to the account owner.
+  Until then both services run the SQLite fallback with `DB_PATH`/`ISSUER_DB_PATH`
+  pointed at `/tmp`, which boots but **loses all state on every cold start**.
+  After accepting: `vercel integration add neon --name veridict-db`, then redeploy
+  both projects so they pick up `DATABASE_URL`.
+- **`veridict.zkred.tech`.** Not attachable from this account. `zkred.tech` is
+  managed at Cloudflare and its apex already points at Vercel's `76.76.21.21`, but
+  it is not in `sumitvekariyas-projects` (the only team on this login), so both
+  `domains add` and `alias set` return 403. The subdomain currently resolves to
+  Google IPs (`216.239.3x.21`), which is the actual cause of the 503.
+- **OAuth.** `BASE_URL` is set to the working `veridict-issuer.vercel.app` rather
+  than the custom domain, because it must match the GitHub OAuth App's callback and
+  the domain does not resolve to Vercel yet. Sign-in needs
+  `https://veridict-issuer.vercel.app/callback` added as an Authorization callback
+  URL on the OAuth App; move both to the custom domain once DNS cuts over.
+- **GitHub App credentials return 401**, so commit statuses and bot comments
+  degrade (logged, non-fatal) until regenerated.
 
 ### Verified so far
 
