@@ -12,7 +12,7 @@ LF_ROOT="${LF_ROOT:-../longfellow-zk}"
 
 step() { printf "\n\033[1;36m==> %s\033[0m\n" "$*"; }
 
-step "[0/6] Install system dependencies"
+step "[0/7] Install system dependencies"
 if [[ "$(uname)" == "Darwin" ]]; then
   if ! command -v brew >/dev/null; then
     echo "    Homebrew not found — install from https://brew.sh first"; exit 1
@@ -31,22 +31,31 @@ else
   exit 1
 fi
 
-step "[1/6] Clone Longfellow (if needed)"
+step "[1/7] Clone Longfellow (if needed)"
 if [[ ! -d "$LF_ROOT" ]]; then
   git clone https://github.com/google/longfellow-zk "$LF_ROOT"
 fi
 
-step "[2/6] Apply reviewer-namespace patch (if not already applied)"
+step "[2/7] Apply patches (if not already applied)"
 pushd "$LF_ROOT" > /dev/null
 if grep -q kReviewerNamespace lib/circuits/mdoc/mdoc_attribute_ids.h 2>/dev/null; then
-  echo "    already applied"
+  echo "    reviewer-namespace: already applied"
 else
   git apply "$OLDPWD/patches/add-reviewer-namespace.patch"
-  echo "    patch applied"
+  echo "    reviewer-namespace: applied"
+fi
+# Adds a dependency-free SHA-256 / AES-256-ECB / RNG shim behind
+# -DLONGFELLOW_PORTABLE_CRYPTO=1. Inert for the native build, which keeps using
+# OpenSSL; required for the WebAssembly build.
+if grep -q LONGFELLOW_PORTABLE_CRYPTO lib/util/crypto.h 2>/dev/null; then
+  echo "    portable-crypto: already applied"
+else
+  git apply "$OLDPWD/patches/portable-crypto.patch"
+  echo "    portable-crypto: applied"
 fi
 popd > /dev/null
 
-step "[3/6] Build Longfellow (Release)"
+step "[3/7] Build Longfellow (Release)"
 CMAKE_EXTRA=()
 if [[ "$(uname)" == "Darwin" ]]; then
   BREW_PREFIX="$(brew --prefix)"

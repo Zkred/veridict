@@ -152,12 +152,26 @@ identicon proxy (DiceBear via wsrv.nl) that the reviewer cards depend on.
 
 ### Tasks
 
-1. **`patches/wasm-crypto-shim.patch`** — swap `lib/util/crypto.{h,cc}` for a
-   dependency-free implementation. Public-domain SHA-256 and a small AES-256-ECB
-   for the PRF, with `RAND_bytes` backed by emscripten's `getentropy` (which
-   routes to `crypto.getRandomValues`). Keep the class shapes identical so no
-   call site changes. Gate it behind `#ifdef __EMSCRIPTEN__` so the native build
-   is untouched and keeps using OpenSSL.
+1. ~~**`patches/portable-crypto.patch`**~~ — **DONE.** Adds
+   `lib/util/portable_crypto.h`, a dependency-free SHA-256, AES-256-ECB and
+   `RAND_bytes` (via `getentropy`, which emscripten routes to
+   `crypto.getRandomValues`). It mirrors the OpenSSL function *names and
+   signatures*, so the diff to Longfellow is 8 lines across `crypto.h` and
+   `crypto.cc`: just which header gets included, behind
+   `-DLONGFELLOW_PORTABLE_CRYPTO=1`. The native build is untouched and keeps
+   using OpenSSL. Upstream merges stay trivial.
+
+   Validated four ways before trusting it:
+   - `prover/tests/portable_crypto_difftest.cc` (CMake target
+     `portable_crypto_difftest`) diffs the shim against real OpenSSL: SHA-256
+     across 20 length classes including the 55/56/57 padding edges, streamed in
+     9 chunk sizes, `CopyState` snapshot semantics, 200 random AES-256-ECB
+     blocks, plus FIPS-197 C.3 and the NIST `"abc"` vectors so a
+     matching-but-wrong pair cannot pass silently. All pass.
+   - A full Longfellow build with the shim regenerates the circuit **byte for
+     byte** (sha256 `9016d173...`).
+   - Shim-built prover to shim-built verifier: OK.
+   - Both cross-compatibility directions between shim and OpenSSL builds: OK.
 2. **zstd for wasm.** Portable C, compiles cleanly. Build it as a sub-target
    rather than relying on an emscripten port.
 3. **`prover/wasm/` emscripten target.** Export `run_mdoc_prover` through an

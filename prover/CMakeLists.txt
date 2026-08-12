@@ -56,3 +56,14 @@ foreach(_cli prover_cli verifier_cli circuit_tool)
     target_link_directories(${_cli} PRIVATE ${ZSTD_LIBRARY_DIRS})
   endif()
 endforeach()
+
+# Differential test for the WASM crypto shim: asserts portable_crypto.h agrees
+# with OpenSSL byte-for-byte. Only available once patches/portable-crypto.patch
+# has been applied to the Longfellow checkout.
+if(EXISTS "${LF_LIB_DIR}/util/portable_crypto.h")
+  add_executable(portable_crypto_difftest tests/portable_crypto_difftest.cc)
+  target_link_libraries(portable_crypto_difftest PRIVATE OpenSSL::Crypto)
+  # The test deliberately calls OpenSSL's deprecated one-shot SHA256_* API,
+  # because that is the API the shim has to match.
+  target_compile_options(portable_crypto_difftest PRIVATE -Wno-deprecated-declarations)
+endif()
