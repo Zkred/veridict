@@ -6,7 +6,7 @@ import os
 import re
 import time
 
-ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-opus-5")
+ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5")
 
 _SYSTEM = """\
 You are a secure software engineer specialising in formally verified code.
