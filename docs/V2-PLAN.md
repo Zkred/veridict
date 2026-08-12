@@ -362,17 +362,31 @@ objects are left zeroed and valid proofs get rejected with
    rotating issuer key invalidates every credential already issued, and a
    rotating pseudonym key makes one reviewer look like several. Both now raise
    with an explanation instead.
-4. **Move the spec gate to GitHub Actions.** This is the important one, and it
-   is a security fix rather than a porting convenience. Today `spec_checker.py`
-   runs `mypy`, `pytest`, and Z3 on AI-generated code via subprocess. On Vercel
-   that code would execute in a function whose environment holds the GitHub App
-   private key. Instead: a workflow in the target repo runs the checks, and the
-   issuer reads the conclusion through the Checks API, verifying it came from
-   the expected workflow at the expected commit SHA.
+4. ~~**Move the spec gate to GitHub Actions.**~~ **DONE** (`issuer/spec_gate.py`,
+   `templates/veridict-spec-gate.yml`). A security fix rather than a porting
+   convenience: `spec_checker.py` ran mypy, pytest and Z3 on PR contents inside
+   the process holding the signing key, so a synthesised PR containing a
+   `conftest.py` that reads the environment is an exfiltration path. On a
+   serverless host that environment also carries the database URL.
 
-   This unblocks two later phases. Phase 4 gets to install Dafny or crosshair in
-   CI without bloating a function bundle, and Phase 5 gets a forge-native place
-   for the gate to live.
+   The non-obvious part is trust. A check run named `veridict-spec-gate`
+   reporting success proves nothing on its own, because anyone with a
+   `checks:write` token on the repo can publish one. The gate therefore only
+   accepts runs whose creator is GitHub Actions (`app.slug`), which nobody else
+   can register.
+
+   Three modes via `SPEC_GATE_MODE`: `ci-required` (production), `ci-preferred`
+   (default, falls back in-process so repos without the workflow still work), and
+   `local`. Verified live: `ci-required` blocks the demo PR with 422 because it has
+   no gate workflow, `ci-preferred` falls back and issues.
+
+   `scripts/validate_spec_gate.py` covers 13 cases, including that a spoofed
+   success is rejected, that a spoof cannot mask a genuine failure, and that a
+   stale success does not outrank a newer failure after a re-run.
+
+   This also unblocks later phases: Phase 4 can install Dafny or crosshair in CI
+   without bloating a function bundle, and Phase 5 gets a forge-native home for
+   the gate.
 5. Point `veridict.zkred.tech` at the new deployment. It currently returns 503.
 
 ### Verified so far

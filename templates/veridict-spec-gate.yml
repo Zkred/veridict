@@ -1,0 +1,74 @@
+# Veridict spec gate.
+#
+# Copy to .github/workflows/veridict-spec-gate.yml in any repository whose PRs
+# you want gated. The issuer reads this workflow's check-run conclusion and
+# refuses to issue a review credential unless it succeeded, which means the
+# formal checks run in GitHub's sandbox rather than inside the issuer process
+# next to its signing key.
+#
+# The job name below becomes the check-run name the issuer looks for. If you
+# rename it, set SPEC_GATE_CHECK_NAME on the issuer to match.
+
+name: veridict-spec-gate
+
+on:
+  pull_request:
+  # Also on push so a re-run against the same head SHA produces a fresh verdict;
+  # the issuer keys everything to the commit, not to the PR.
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  veridict-spec-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install checkers
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install mypy pytest z3-solver
+          # Install the project's own dependencies when it declares any, so mypy
+          # resolves real imports instead of guessing.
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      - name: mypy
+        run: |
+          # Type-check implementation files. Test files are covered by pytest,
+          # and z3 property files use wildcard imports mypy cannot resolve.
+          files=$(git ls-files '*.py' \
+            | grep -v -E '(^|/)(test_|conftest)' \
+            | grep -v -E '(^|/)z3_' \
+            | grep -v -E '_z3\.py$' || true)
+          if [ -n "$files" ]; then
+            mypy --ignore-missing-imports $files
+          else
+            echo "no implementation files to type-check"
+          fi
+
+      - name: pytest
+        run: |
+          if git ls-files '*test_*.py' 'test_*.py' | grep -q .; then
+            pytest --tb=short -q
+          else
+            echo "no tests present"
+          fi
+
+      - name: Z3 properties
+        run: |
+          # Each z3_*.py asserts properties about the implementation and exits
+          # non-zero when a property fails to hold.
+          found=0
+          for f in $(git ls-files 'z3_*.py' '*_z3.py'); do
+            found=1
+            echo "== $f"
+            python "$f"
+          done
+          [ "$found" -eq 0 ] && echo "no Z3 property files"
+          exit 0

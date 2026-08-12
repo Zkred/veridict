@@ -60,6 +60,7 @@ from mdoc_builder import (
     issuer_public_key_hex,
     load_or_create_issuer_key,
 )
+import spec_gate
 from spec_checker import fetch_pr_files, run_spec_check
 from synthesizer import create_github_pr, synthesize_code
 from templates import (
@@ -503,6 +504,55 @@ async def review_load(pr: str, session: str | None = Cookie(default=None)) -> HT
     ))
 
 
+async def _evaluate_spec_gate(
+    owner: str, repo: str, pr_num: int, sha: str,
+    token: str, gh_headers: dict,
+) -> tuple[dict, str | None]:
+    """Resolves the formal spec gate for a commit.
+
+    Returns (spec_check, error_message). A non-None error means issuance is
+    refused. See issuer/spec_gate.py for why the CI-sourced verdict is preferred:
+    running mypy and pytest on PR contents inside the issuer executes
+    attacker-influenced code in the process holding the signing key.
+    """
+    if spec_gate.MODE in ("ci-required", "ci-preferred"):
+        verdict = await spec_gate.fetch_ci_verdict(owner, repo, sha, token)
+        if verdict["passed"]:
+            return (
+                {"passed": True, "skipped": False, "source": "ci",
+                 "details_url": verdict.get("details_url")},
+                None,
+            )
+        if verdict["found"] or spec_gate.MODE == "ci-required":
+            # A found-but-failing gate is a hard no. In ci-required, so is a
+            # missing one: absence of evidence must not read as a pass.
+            return {}, (
+                f"CI spec gate did not pass: {verdict['reason']}. "
+                "Fix the checks and push again before requesting approval."
+            )
+        print(f"[spec-gate] falling back to in-process checks: {verdict['reason']}")
+
+    # Fallback / local mode: fetch the PR's Python files and check them here.
+    async with httpx.AsyncClient(timeout=15) as client:
+        files_resp = await client.get(
+            f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_num}/files",
+            headers=gh_headers, params={"per_page": 100},
+        )
+        files = files_resp.json() if files_resp.status_code == 200 else []
+    py_contents = await fetch_pr_files(owner, repo, sha, files, token)
+    loop = asyncio.get_event_loop()
+    spec_check = await loop.run_in_executor(None, run_spec_check, py_contents)
+
+    if not spec_check.get("passed") and not spec_check.get("skipped"):
+        return {}, (
+            "Spec check failed — fix mypy and pytest errors before "
+            "requesting anonymous approval. "
+            f"mypy: {'✓' if spec_check.get('mypy_ok') else '✗'}  "
+            f"pytest: {'✓' if spec_check.get('pytest_ok') else '✗'}"
+        )
+    return spec_check, None
+
+
 @app.post("/approve/credential")
 async def approve_credential(
     body: CredentialRequest,
@@ -575,24 +625,12 @@ async def approve_credential(
                   "Accept": "application/vnd.github+json"}
     if token == "DEV_NO_TOKEN":
         gh_headers.pop("Authorization")
-    async with httpx.AsyncClient(timeout=15) as client:
-        files_resp = await client.get(
-            f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_num}/files",
-            headers=gh_headers, params={"per_page": 100},
-        )
-        files = files_resp.json() if files_resp.status_code == 200 else []
-    py_contents = await fetch_pr_files(owner, repo, sha, files, token)
-    loop = asyncio.get_event_loop()
-    spec_check = await loop.run_in_executor(None, run_spec_check, py_contents)
 
-    if not spec_check.get("passed") and not spec_check.get("skipped"):
-        return err(
-            "Spec check failed — fix mypy and pytest errors before "
-            "requesting anonymous approval. "
-            f"mypy: {'✓' if spec_check.get('mypy_ok') else '✗'}  "
-            f"pytest: {'✓' if spec_check.get('pytest_ok') else '✗'}",
-            422,
-        )
+    spec_check, gate_err = await _evaluate_spec_gate(
+        owner, repo, pr_num, sha, token, gh_headers
+    )
+    if gate_err is not None:
+        return err(gate_err, 422)
 
     # Mint an MDOC around the device public key the browser generated. The issuer
     # never sees the matching private key, so it cannot forge an approval on this
@@ -611,7 +649,11 @@ async def approve_credential(
     )
     pseudonym = _pseudonym_for(user_id, pr_key)
     reputation = await _compute_reputation(s)
-    if not spec_check.get("skipped"):
+    if spec_check.get("source") == "ci":
+        # The verdict came from the repository's own CI, so name that rather than
+        # implying the issuer ran the tools itself.
+        reputation["spec_check"] = f"{spec_gate.CHECK_NAME} ✓ (CI)"
+    elif not spec_check.get("skipped"):
         parts = ["mypy ✓", "pytest ✓"] if spec_check.get("has_tests") else ["mypy ✓"]
         if spec_check.get("has_z3"):
             parts.append("z3 ✓")
