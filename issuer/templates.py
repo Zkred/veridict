@@ -1385,6 +1385,11 @@ def pr_review_page(user_login: str, owner: str, repo: str, pr_num: int,
         rows = _check_row("mypy", mypy_ok, "" if mypy_ok else "type errors")
         rows += _check_row("pytest", pytest_ok, "no tests" if pytest_ok is None else ("" if pytest_ok else "failures"))
         rows += _check_row("z3 properties", z3_ok, "not present" if z3_ok is None else ("" if z3_ok else "failed"))
+        xh_ok = sc.get("crosshair_ok") if sc.get("has_contracts") else None
+        rows += _check_row(
+            "crosshair (code↔spec)", xh_ok,
+            "no contracts" if xh_ok is None else ("" if xh_ok else "counterexample found"),
+        )
         n = sc.get("files_checked", 0)
         status_color = "var(--success)" if sc.get("passed") else "var(--danger)"
         status_text = "All checks passed" if sc.get("passed") else "Check failures — approval blocked"
@@ -1401,6 +1406,8 @@ def pr_review_page(user_login: str, owner: str, repo: str, pr_num: int,
                 errs.append(('pytest output', sc["pytest_output"]))
             if not sc.get("z3_ok", True) and sc.get("z3_output"):
                 errs.append(('z3 output', sc["z3_output"]))
+            if not sc.get("crosshair_ok", True) and sc.get("crosshair_output"):
+                errs.append(('crosshair counterexample', sc["crosshair_output"]))
             for (lbl, out) in errs:
                 spec_widget += (
                     f'<details style="margin-top:0.5rem">'

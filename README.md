@@ -3,8 +3,10 @@
 Anonymous, cryptographically-attested code review for AI-synthesized code.
 
 A natural-language spec drives Claude to generate an implementation, a pytest
-suite, and a Z3 invariant file. The reviewed repository's own CI runs all three.
-Only if they pass will the issuer mint a reviewer credential — and the reviewer
+suite, a Z3 invariant file, and `pre:`/`post:` contracts on every public
+function. The reviewed repository's own CI runs all four checks — mypy, pytest,
+Z3, and `crosshair` against those contracts.
+Only if they all pass will the issuer mint a reviewer credential — and the reviewer
 then proves they hold that credential **in their browser**, without revealing who
 they are. N anonymous approvals on a specific commit flip a GitHub commit status,
 and branch protection unlocks the merge.
@@ -20,6 +22,11 @@ Two pull requests on the demo repo, same gate, opposite outcomes:
 | [#9](https://github.com/vayu-network/anonymous-review-demo/pull/9) | **blocks approval** | Claude's own tests were wrong: an ordering comparison against `pytest.approx`, and a test passing `rate=0` right after commenting that it is invalid |
 | [#13](https://github.com/vayu-network/anonymous-review-demo/pull/13) | **permits approval** | mypy, pytest and Z3 all green in CI |
 
+And the case that motivates the fourth check: given the same synthesized rate limiter with
+`self.tokens >= n` changed to `>= n - 1`, mypy passes, all 9 generated tests pass,
+Z3 reports "All Z3 properties verified" — and crosshair reports
+`false when calling consume(TokenBucket(1, 1), 2)`.
+
 PR #9 is the point of the project: code that looks right, passes review by
 eye, and fails on invariants.
 
@@ -28,7 +35,7 @@ eye, and fails on invariants.
 ```
 spec ──► Claude ──► implementation + tests + Z3 properties ──► PR (GitHub App)
                                                                 │
-                    reviewed repo's CI runs mypy + pytest + Z3 ─┘
+        repo CI: mypy + pytest + Z3 + crosshair (code↔spec) ─────┘
                                      │ check run: veridict-spec-gate
                                      ▼
 reviewer's browser                issuer  ── reads the CI verdict; refuses to
@@ -160,10 +167,15 @@ Full notes: [`docs/mdoc-format-notes.md`](docs/mdoc-format-notes.md).
    trust the issuer, which today blocks duplicates server-side via an
    `(pr_key, user_id)` record. The cryptographic fix derives a blinded ID inside
    the circuit; that forks the circuit and diverges from upstream.
-2. **Z3 proves the spec, not the implementation.** The gate establishes that the
-   spec is internally consistent, the code typechecks, and the tests pass — not
-   that the implementation satisfies the spec. Tests written by the same model
-   that wrote the code are weak evidence, which PR #9 demonstrates.
+2. **Code-to-spec checking is contract-shaped, not a proof.** Z3 establishes that
+   the spec is self-consistent; `crosshair` symbolically executes each function
+   against the `pre:`/`post:` contracts in its docstring and reports concrete
+   counterexamples. That closes the gap between "the tests pass" and "the
+   implementation satisfies the spec" — measured on synthesized code with a
+   one-character off-by-one, mypy, pytest and Z3 all passed while crosshair
+   produced `consume(TokenBucket(1, 1), 2)`. It is bounded, not exhaustive:
+   coverage is only as good as the contracts, and symbolic execution times out
+   rather than proving. A refinement proof (Dafny, Lean) would be stronger.
 3. **One credential per PR.** The transcript embeds the `pr_key`, so a
    force-push invalidates prior approvals — intended, but it means a fresh
    credential per commit.

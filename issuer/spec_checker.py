@@ -1,12 +1,24 @@
-"""Formal spec conformance check: run mypy + pytest on PR Python files."""
+"""Formal spec conformance check: mypy + pytest + Z3 + crosshair on PR files.
+
+Kept for local development and the ci-preferred fallback. In production the gate
+is sourced from the reviewed repository's CI instead (see issuer/spec_gate.py):
+running these tools here executes attacker-influenced PR code in the process
+that holds the signing key.
+"""
+
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
 import httpx
+
+# A PEP 316 contract line, e.g. "    pre: n >= 0" inside a docstring. Used to
+# skip crosshair entirely on files that declare no contracts.
+_CONTRACT_RE = re.compile(r"^\s*(pre|post)(_always)?:", re.M)
 
 
 async def fetch_pr_files(
@@ -109,16 +121,41 @@ def run_spec_check(file_contents: dict[str, str]) -> dict:
                 z3_ok = z3_ok and (z3r.returncode == 0)
                 z3_out += (z3r.stdout + z3r.stderr).strip()
 
+        # crosshair: does the implementation satisfy the contracts the spec
+        # demands? mypy, pytest and Z3 between them establish that the code
+        # typechecks, that the model's own tests pass, and that the spec is
+        # self-consistent — none of them relate implementation to spec, and the
+        # tests share the blind spots of the model that wrote the code.
+        # Functions without pre/post contracts are skipped, so this is inert on
+        # code that declares none.
+        contract_files = [
+            f for f in impl_files if _CONTRACT_RE.search(file_contents[f])
+        ]
+        crosshair_ok = True
+        crosshair_out = ""
+        has_contracts = bool(contract_files)
+        if contract_files:
+            ch = subprocess.run(
+                [sys.executable, "-m", "crosshair", "check",
+                 "--per_condition_timeout=20", *contract_files],
+                cwd=tmpdir, capture_output=True, text=True, timeout=240,
+            )
+            crosshair_ok = ch.returncode == 0
+            crosshair_out = (ch.stdout + ch.stderr).strip()
+
     return {
-        "passed": mypy_ok and pytest_ok and z3_ok,
+        "passed": mypy_ok and pytest_ok and z3_ok and crosshair_ok,
         "skipped": False,
         "mypy_ok": mypy_ok,
         "pytest_ok": pytest_ok,
         "z3_ok": z3_ok,
+        "crosshair_ok": crosshair_ok,
         "has_tests": bool(test_files),
         "has_z3": has_z3,
+        "has_contracts": has_contracts,
         "mypy_output": mypy_out[-600:],
         "pytest_output": pytest_out[-600:],
         "z3_output": z3_out[-600:],
+        "crosshair_output": crosshair_out[-600:],
         "files_checked": len(file_contents),
     }

@@ -33,7 +33,7 @@ jobs:
       - name: Install checkers
         run: |
           python -m pip install --upgrade pip
-          python -m pip install mypy pytest z3-solver
+          python -m pip install mypy pytest z3-solver crosshair-tool
           # Install the project's own dependencies when it declares any, so mypy
           # resolves real imports instead of guessing.
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
@@ -59,6 +59,32 @@ jobs:
           else
             echo "no tests present"
           fi
+
+      - name: crosshair (code-to-spec)
+        run: |
+          # The other three checks establish that the code typechecks, that the
+          # tests pass, and that the spec is internally consistent. None of them
+          # establish that the *implementation* satisfies the spec — and the
+          # tests were written by the same model that wrote the code, so they
+          # share its blind spots.
+          #
+          # crosshair symbolically executes each function against the pre/post
+          # contracts in its docstring and reports a concrete counterexample when
+          # one exists. Functions without contracts are simply skipped, so this
+          # is a no-op on code that declares nothing.
+          files=$(git ls-files '*.py' \
+            | grep -v -E '(^|/)(test_|conftest)' \
+            | grep -v -E '(^|/)z3_' \
+            | grep -v -E '_z3\.py$' || true)
+          if [ -z "$files" ]; then
+            echo "no implementation files to analyse"
+            exit 0
+          fi
+          if ! grep -qE '^\s*(pre|post):' $files; then
+            echo "no pre/post contracts declared — nothing for crosshair to check"
+            exit 0
+          fi
+          crosshair check --per_condition_timeout=20 $files
 
       - name: Z3 properties
         run: |

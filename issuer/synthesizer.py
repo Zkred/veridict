@@ -12,9 +12,14 @@ _SYSTEM = """\
 You are a secure software engineer specialising in formally verified code.
 Given a specification, generate three Python files.
 
-Output ONLY files in this exact format (no prose before or after):
---- filename: path/to/file.py ---
-<file contents>
+Output ONLY files, each delimited exactly like this, with no prose before or
+after. Between the two delimiters put the complete file, starting with its first
+real line of code — never a placeholder, and never the words "file contents":
+
+--- filename: rate_limiter.py ---
+from typing import Final
+
+MAX: Final[int] = 10
 --- end ---
 
 Generate exactly these three files:
@@ -22,6 +27,26 @@ Generate exactly these three files:
 1. Implementation file (e.g. rate_limiter.py)
    - Full type annotations
    - Minimal, correct, readable
+   - Every public function and method carries a PEP 316 contract in its
+     docstring, which the `crosshair` checker verifies by symbolic execution:
+
+         def consume(self, n: int) -> bool:
+             '''Take n tokens if available.
+
+             pre: n >= 0
+             post: self.tokens >= 0
+             post: self.tokens <= self.capacity
+             '''
+
+   - Write the postconditions the SPECIFICATION demands, not the ones your
+     implementation happens to satisfy. These are checked against every possible
+     input, not just the cases your tests cover, so a contract that merely
+     restates the code proves nothing.
+   - Use `pre:` only for genuine caller obligations. If the function raises on
+     bad input, that is behaviour to test, not a precondition.
+   - Refer to `__return__` for the return value and `__old__.x` for a value as it
+     was on entry (e.g. `post: self.tokens <= __old__.self.tokens`).
+   - Keep each condition a single side-effect-free Python expression.
 
 2. Test file (test_*.py)
    - pytest tests that directly verify each requirement in the spec
@@ -30,7 +55,8 @@ Generate exactly these three files:
      positive, never call with rate=0). Test invalid inputs only in tests
      explicitly named test_*invalid* or test_*raises*, using pytest.raises.
    - All assertions on numeric results must match the implementation exactly —
-     do NOT assume float == int without a tolerance (use pytest.approx)
+     do NOT assume float == int without a tolerance (use pytest.approx).
+     pytest.approx supports == only; never use it with <, <=, > or >=.
 
 3. Z3 formal properties file (z3_*.py)
    - MUST start with exactly: from z3 import *
@@ -93,12 +119,36 @@ async def synthesize_code(spec: str) -> dict[str, str]:
     return _parse_files(text)
 
 
+# A lone angle-bracket placeholder the model sometimes copies out of the format
+# example, e.g. "<file contents>". Harmless-looking, but it makes the file a
+# syntax error, so strip it rather than shipping it.
+_PLACEHOLDER_RE = re.compile(r"\A\s*<[^>\n]{0,60}>[ \t]*\r?\n")
+
+
 def _parse_files(text: str) -> dict[str, str]:
     files: dict[str, str] = {}
     for m in re.finditer(
         r"---\s*filename:\s*(.+?)\s*---\n(.*?)---\s*end\s*---", text, re.DOTALL
     ):
-        files[m.group(1).strip()] = m.group(2)
+        files[m.group(1).strip()] = _PLACEHOLDER_RE.sub("", m.group(2))
+
+    # Refuse to hand back code that cannot even be parsed. Without this the
+    # pipeline happily opens a PR full of syntax errors: every gate check then
+    # fails, which is safe but wastes a review cycle and reads as a Veridict bug
+    # rather than a synthesis one.
+    broken: list[str] = []
+    for name, content in files.items():
+        if not name.endswith(".py"):
+            continue
+        try:
+            compile(content, name, "exec")
+        except SyntaxError as e:
+            broken.append(f"{name}:{e.lineno}: {e.msg}")
+    if broken:
+        raise RuntimeError(
+            "synthesis produced files that are not valid Python: "
+            + "; ".join(broken)
+        )
     return files
 
 

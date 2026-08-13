@@ -511,10 +511,36 @@ self-contradictory."
 With the gate living in CI after Phase 2, this becomes mostly prompt and
 workflow work.
 
-1. **`crosshair` first.** Concolic execution over ordinary annotated Python.
-   It finds counterexamples to `# pre:` / `# post:` contracts, installs with
-   pip, and needs no second language from the synthesizer. Add it as a fourth
-   check and extend the synthesis prompt to emit contracts.
+1. ~~**`crosshair` first.**~~ **DONE.** Added as the fourth gate check
+   (`templates/veridict-spec-gate.yml`, mirrored in `issuer/spec_checker.py` for
+   the local fallback), and the synthesis prompt now emits PEP 316 `pre:`/`post:`
+   contracts on every public function.
+
+   Measured on real synthesized code — a token-bucket limiter with
+   `self.tokens >= n` changed to `>= n - 1`, a one-character edit:
+
+   | check | verdict |
+   |---|---|
+   | mypy | passes |
+   | pytest (9 generated tests) | passes |
+   | Z3 | "All Z3 properties verified" |
+   | **crosshair** | **`false when calling consume(TokenBucket(1, 1), 2)`** |
+
+   That row is Reviewer 2's critique made concrete: Z3 reports success because it
+   verifies the *spec*, while the *implementation* is wrong. crosshair relates the
+   two and returns a reproducing input.
+
+   Bounded, not a proof: coverage is only as good as the declared contracts, and
+   symbolic execution times out rather than proving. Functions without contracts
+   are skipped, so the check is inert on code that declares none.
+
+   Two synthesis-pipeline bugs surfaced while wiring this up. The prompt's
+   `<file contents>` placeholder was echoed literally as the first line of every
+   generated file — a latent fragility the longer prompt tipped over — so the
+   format spec now uses a real worked example, and `_parse_files` both strips a
+   stray placeholder line and refuses to return files that fail `compile()`.
+   Previously the pipeline would open a PR full of syntax errors, which the gate
+   correctly failed but which reads as a Veridict bug rather than a synthesis one.
 2. **Dafny or Lean 4 as the stretch.** Stronger claim, much larger build: the
    synthesizer must emit an implementation plus a machine-checkable refinement
    proof, and the gate checks the proof. Worth scoping only once crosshair is
