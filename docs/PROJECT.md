@@ -9,19 +9,42 @@
 
 Built for the **Secure Program Synthesis Hackathon (May 22–24, 2026)**.
 
+> **Status: this document describes the hackathon build.** Three things changed
+> materially afterwards, and where this document and the list below disagree, the
+> list is current:
+>
+> - **Proving moved into the reviewer's browser** (WebAssembly). The issuer never
+>   holds the device key, so it cannot approve on anyone's behalf.
+> - **The formal gate moved into the reviewed repository's CI.** The issuer reads
+>   a GitHub Actions check run instead of executing PR code itself.
+> - **It is deployed** at <https://veridict.zkred.tech> — two Vercel functions,
+>   two Neon databases, verification in-process via wasmtime.
+>
+> See [`V2-PLAN.md`](V2-PLAN.md) for what was built, measured and why.
+
 ---
 
 ## TL;DR
 
-We built a full **secure program synthesis pipeline** on top of Google Longfellow ZK:
+A full **secure program synthesis pipeline** on top of Google Longfellow ZK:
 
 1. A maintainer writes a **natural-language specification**.
-2. **Claude API synthesizes** a Python implementation + test suite from the spec and opens a GitHub PR automatically.
-3. During review, the issuer fetches the PR files and runs **mypy + pytest** — formal spec conformance checks. If either fails, no ZK credential is issued.
-4. A qualified reviewer reads the diff in our UI; a **green spec check banner** confirms the code is formally verified before they approve.
-5. The issuer mints a one-shot **MDOC credential** bound to that exact commit, runs Longfellow's prover (~10 s, 360 KB proof), and submits the proof to the backend.
-6. The backend verifies the proof and, as a **GitHub App bot**, posts an anonymous comment and pushes a commit status driving branch protection.
-7. After N approvals, the **merge button enables** on GitHub. CI, PR author, and the bot never learn who any reviewer is.
+2. **Claude synthesizes** a Python implementation, a pytest suite and a Z3
+   invariant file, and the GitHub App opens a PR automatically.
+3. The reviewed repository's **CI runs mypy + pytest + Z3** and publishes a
+   `veridict-spec-gate` check run. The issuer reads that verdict and refuses to
+   issue a credential unless it passed — so attacker-influenced PR code never
+   executes in the process holding the signing key.
+4. A qualified reviewer reads the diff in our UI, which shows the CI verdict and
+   links to the run.
+5. The reviewer's **browser** generates a non-extractable device key, receives an
+   MDOC credential signed around its public half, and **proves in WebAssembly**
+   (~5 s, 360 KB proof).
+6. The backend verifies the proof **in-process under wasmtime**, then as a
+   **GitHub App bot** posts an anonymous comment and pushes a commit status
+   driving branch protection.
+7. After N approvals, the **merge button enables**. CI, the PR author, the bot —
+   and now the issuer — never learn who any reviewer is.
 
 The demo runs against a real public repo
 ([vayu-network/anonymous-review-demo](https://github.com/vayu-network/anonymous-review-demo))
@@ -59,31 +82,38 @@ We want: **proof a reviewer is qualified**, **unlinkability of identity**,
 > Each anonymous approval = a ZK proof that the reviewer holds an MDOC
 > credential signed by a trusted issuer, attesting that the holder is a
 > member of the project's org with the right role — **and that the code
-> passed mypy + pytest before the credential was issued**.
+> passed mypy + pytest + Z3 in the repository's own CI before the credential
+> was issued**.
 
 ```
 Spec (natural language)
   │
   ├─[0]──► Claude API  (synthesis)
-  │        Generates implementation + pytest test suite.
+  │        Generates implementation + pytest suite + Z3 properties.
   │        GitHub App opens a PR automatically.
+  │        The repo's CI runs the three checks and publishes a
+  │        `veridict-spec-gate` check run on that commit.
   │
   └──── Reviewer opens the PR in our UI
           │
           ├─[1]──► Issuer  (GitHub OAuth gated)
           │        Verifies you're in REQUIRED_ORG.
-          │        Fetches PR files, runs mypy + pytest.
-          │        Gate: if either fails → no credential, no proof.
-          │        Mints an ES256-signed MDOC credential bound to
-          │        the PR's HEAD commit SHA.
+          │        Reads the CI check run — trusting only runs created
+          │        by GitHub Actions, since anyone with checks:write
+          │        could otherwise publish a passing gate.
+          │        Gate: not passed → no credential, no proof.
+          │        Mints an ES256-signed MDOC bound to the HEAD SHA,
+          │        around a device public key the browser generated.
           │
-          ├─[2]──► Prover  (Longfellow C++)
-          │        run_mdoc_prover → 360 KB ZK proof. Public inputs:
-          │        issuer pubkey, session transcript (= sha256 of the
-          │        PR key), claim (role = "maintainer"), current time.
+          ├─[2]──► Prover  (Longfellow, WebAssembly, in the browser)
+          │        ~5 s → 360 KB ZK proof. Public inputs: issuer pubkey,
+          │        session transcript (= sha256 of the PR key), claim
+          │        (role = "maintainer"), current time. The device
+          │        private key never leaves the browser.
           │
           └─[3]──► Backend  (Python FastAPI)
-                   run_mdoc_verifier checks the proof. If valid:
+                   Verifies the proof in-process under wasmtime — the same
+                   module the browser proved with, no native binary. If valid:
                      - increments approval count
                      - pushes zk-review-gate commit status (pending/success)
                      - posts anonymous PR comment with pseudonym + chips
@@ -99,20 +129,22 @@ Spec (natural language)
 ```
 ┌──────────────────────────────────────────────────────────┐
 │  Synthesis                                               │
-│  Spec text ──► Claude API ──► code + tests ──► GitHub PR│
+│  Spec ──► Claude ──► code + tests + Z3 ──► GitHub PR     │
+│                    repo CI ──► veridict-spec-gate check  │
 └──────────────────────────────────────────────────────────┘
                                          │
                                          ▼ reviewer opens PR
-┌──────────────┐   OAuth + spec check   ┌──────────────────┐
+┌──────────────┐   OAuth + device pubkey ┌──────────────────┐
 │  Reviewer    │ ──────────────────────► │     Issuer       │
-│  (browser)   │                         │  mypy + pytest   │
-│              │ ◄── MDOC + transcript ──│  gate: pass only │
-└──────┬───────┘                         └──────────────────┘
-       │ ZK proof submission
+│  (browser)   │                         │  reads CI verdict│
+│  proves in   │ ◄── MDOC + bytes to ────│  gate: pass only │
+│  WebAssembly │     sign + transcript   └──────────────────┘
+└──────┬───────┘
+       │ ZK proof submission (device key never leaves the browser)
        ▼
-┌──────────────┐   run_mdoc_verifier    ┌──────────────────┐
+┌──────────────┐   in-process wasmtime  ┌──────────────────┐
 │   Backend    │ ──────────────────────►│   Longfellow     │
-│   (Python)   │                        │   verifier       │
+│   (Python)   │   (no native binary)   │   verifier .wasm │
 └──────┬───────┘                        └──────────────────┘
        │ as GitHub App bot
        ▼
@@ -362,7 +394,7 @@ requested a credential for a given PR; what it cannot do is vote for them.
    reviewer would require a pool of bot accounts (collapses anonymity
    if pool is small) — we chose pseudonym + identicon inside the comment
    body instead.
-5. **Spec check is Python-only.** mypy + pytest only runs on `.py`
+5. **Spec check is Python-only.** mypy + pytest + Z3 only run on `.py`
    files. PRs with Go, Rust, or C++ code are given a pass-through
    (skipped, not blocked). Production would add per-language checks.
 6. **In-memory approval store.** Approvals are lost on backend restart.
