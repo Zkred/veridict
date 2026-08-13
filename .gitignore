@@ -75,3 +75,4 @@ docs/demo-frames/
 prover/wasm/obj/
 prover/build-portable/
 .vercel
+.env*.local

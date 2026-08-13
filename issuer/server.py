@@ -77,6 +77,10 @@ REQUIRED_ORG = os.environ.get("REQUIRED_ORG", "myorg")
 # Fallback: also accept outside collaborators on this repo (owner/repo format).
 REQUIRED_REPO = os.environ.get("REQUIRED_REPO", "")
 ISSUER_KEY_PATH = os.environ.get("ISSUER_KEY_PATH", "issuer_key.pem")
+# Resolved against the project root like every other path here. Left unresolved it
+# followed the working directory, so running the server from issuer/ generated a
+# *second*, unrelated signing identity at issuer/issuer_key.pem instead of loading
+# the intended one — a silent identity split rather than an error.
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:8000")
 BACKEND_URL = os.environ.get("BACKEND_URL", "http://localhost:8001")
 _PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -249,7 +253,7 @@ async def _authorize_for_repo(
 
 
 app = FastAPI(title="Veridict Issuer")
-issuer_key = load_or_create_issuer_key(ISSUER_KEY_PATH)
+issuer_key = load_or_create_issuer_key(_resolve(ISSUER_KEY_PATH))
 db.init_db()
 
 # Serve bot-avatar.svg/png and any other shared assets under /static/...
