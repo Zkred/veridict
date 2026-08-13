@@ -494,11 +494,18 @@ async def review_load(pr: str, session: str | None = Cookie(default=None)) -> HT
         )
         files = files_resp.json() if files_resp.status_code == 200 else []
 
-    # Fetch full content + run spec check asynchronously (non-blocking for
-    # non-Python PRs — run_spec_check itself is CPU-bound but fast).
-    py_contents = await fetch_pr_files(owner, repo, sha, files, token)
-    loop = asyncio.get_event_loop()
-    spec_check = await loop.run_in_executor(None, run_spec_check, py_contents)
+    # Use the same gate that decides at approve time. Rendering a second,
+    # independently-computed verdict here meant the banner could contradict the
+    # real decision — and did: with SPEC_GATE_MODE=ci-required the deployment has
+    # no mypy/pytest/z3 installed, so the in-process checker reported
+    # "ModuleNotFoundError" as check *failures* and disabled the approve button
+    # for a PR whose CI gate had actually passed.
+    spec_check, gate_err = await _evaluate_spec_gate(
+        owner, repo, pr_num, sha, token, headers
+    )
+    if gate_err is not None:
+        spec_check = {"passed": False, "skipped": False, "source": "ci",
+                      "reason": gate_err}
 
     return HTMLResponse(pr_review_page(
         user_login=s["login"],

@@ -1352,7 +1352,31 @@ def pr_review_page(user_login: str, owner: str, repo: str, pr_num: int,
                 f'<span style="width:1.1rem;text-align:center;font-weight:600">{icon}</span>'
                 f'<span>{escape(label)}</span>{detail_html}</div>')
 
-    if sc.get("skipped"):
+    if sc.get("source") == "ci":
+        # The verdict came from the reviewed repository's CI. There are no local
+        # mypy/pytest/z3 sub-results to show, so report the gate itself and link
+        # to the run rather than implying the issuer ran the tools.
+        passed = sc.get("passed")
+        colour = "var(--success)" if passed else "var(--danger)"
+        headline = ("Spec gate passed in CI" if passed
+                    else "Spec gate not passed — approval blocked")
+        detail = escape(str(sc.get("reason", "")))
+        link = sc.get("details_url")
+        spec_widget = (
+            f'<div style="font-size:0.8rem;font-weight:600;color:{colour};'
+            f'margin-bottom:0.4rem">{headline}</div>'
+            f'<p class="meta" style="margin:0;font-size:0.78rem">{detail}</p>'
+        )
+        if link:
+            spec_widget += (
+                f'<p class="meta" style="margin:0.4rem 0 0;font-size:0.78rem">'
+                f'<a href="{escape(link)}" target="_blank" rel="noopener">View the CI run →</a></p>'
+            )
+        spec_widget += (
+            '<p class="meta" style="margin:0.4rem 0 0;font-size:0.74rem">'
+            'Checks run in the repository\'s own CI, not in the issuer.</p>'
+        )
+    elif sc.get("skipped"):
         spec_widget = '<p class="meta" style="margin:0;font-size:0.82rem">No Python files — spec check skipped.</p>'
     else:
         mypy_ok = sc.get("mypy_ok")
