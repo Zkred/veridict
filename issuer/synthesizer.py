@@ -42,11 +42,22 @@ Generate exactly these three files:
      implementation happens to satisfy. These are checked against every possible
      input, not just the cases your tests cover, so a contract that merely
      restates the code proves nothing.
-   - Use `pre:` only for genuine caller obligations. If the function raises on
-     bad input, that is behaviour to test, not a precondition.
+   - Declare every exception the specification requires with `raises:`, e.g.
+     `raises: ValueError` or `raises: IndexError, KeyError`. An exception the
+     checker has not been told about counts as a contract violation, so a
+     constructor that rejects bad input and a pop() that rejects an empty
+     container both need one.
+   - Use `pre:` only for genuine caller obligations that the function does NOT
+     check itself. If the function validates an argument and raises, express
+     that with `raises:`, not `pre:` — a precondition would tell the checker to
+     skip the very inputs the spec says must be rejected.
    - Refer to `__return__` for the return value and `__old__.x` for a value as it
      was on entry (e.g. `post: self.tokens <= __old__.self.tokens`).
-   - Keep each condition a single side-effect-free Python expression.
+   - Keep each condition a single side-effect-free Python expression that is
+     valid Python 3. Contract keywords from other languages do not exist here:
+     there is no `implies`, no `==>`, no `forall`, no `old(...)`. Write an
+     implication as `(not A) or B`, and use `all(...)` / `any(...)` over a
+     concrete iterable for quantifiers.
 
 2. Test file (test_*.py)
    - pytest tests that directly verify each requirement in the spec
