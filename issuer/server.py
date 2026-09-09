@@ -556,10 +556,12 @@ async def _evaluate_spec_gate(
 
     if not spec_check.get("passed") and not spec_check.get("skipped"):
         return {}, (
-            "Spec check failed — fix mypy and pytest errors before "
+            "Spec check failed — fix mypy, pytest, Z3 or crosshair errors before "
             "requesting anonymous approval. "
             f"mypy: {'✓' if spec_check.get('mypy_ok') else '✗'}  "
-            f"pytest: {'✓' if spec_check.get('pytest_ok') else '✗'}"
+            f"pytest: {'✓' if spec_check.get('pytest_ok') else '✗'}  "
+            f"z3: {'✓' if spec_check.get('z3_ok', True) else '✗'}  "
+            f"crosshair: {'✓' if spec_check.get('crosshair_ok', True) else '✗'}"
         )
     return spec_check, None
 

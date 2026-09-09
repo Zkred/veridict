@@ -908,25 +908,26 @@ def login_page(error: str | None = None) -> str:
           <h2 class="v-h2">Three steps. One signature.</h2>
           <p class="v-lede">No checklists. No vibes. Each PR walks the same path
              from English spec to anonymous merge approval, and the issuer
-             refuses to sign if any of the three formal layers fails.</p>
+             refuses to sign if any of the four formal layers fails.</p>
           <div class="v-pillars">
             <div class="v-pill">
               <div class="num">01 / Synthesis</div>
-              <h3>Spec in. Three artifacts out.</h3>
+              <h3>Spec in. Four artifacts out.</h3>
               <p>Claude turns your spec into an implementation, a pytest suite,
-                 and a Z3 invariant file. The bot opens the PR for you.</p>
+                 Z3 invariants and pre/post contracts. The bot opens the PR for you.</p>
             </div>
             <div class="v-pill">
               <div class="num">02 / Verification</div>
-              <h3>Three layers. No vibes.</h3>
-              <p>mypy checks types. pytest checks behaviour. Z3 checks
-                 invariants symbolically. Any failure → no credential.</p>
+              <h3>Four layers. No vibes.</h3>
+              <p>mypy checks types. pytest checks behaviour. Z3 checks the
+                 spec's invariants. crosshair checks the code against its
+                 contracts, in your repo's own CI. Any failure → no credential.</p>
             </div>
             <div class="v-pill">
               <div class="num">03 / Anonymous Approval</div>
-              <h3>ZK proof in ~10s.</h3>
-              <p>A Longfellow proof replaces your identity with a stable
-                 per-PR pseudonym. N proofs land → merge button unlocks.</p>
+              <h3>ZK proof in ~5s, in your browser.</h3>
+              <p>A Longfellow proof, generated client-side, replaces your identity
+                 with a stable per-PR pseudonym. N proofs land → merge button unlocks.</p>
             </div>
           </div>
 
@@ -972,7 +973,7 @@ def login_page(error: str | None = None) -> str:
                     </svg>
                   </div>
                   <div class="v-fnode-label">Verify</div>
-                  <div class="v-fnode-sub">mypy · pytest · z3</div>
+                  <div class="v-fnode-sub">mypy · pytest · z3 · crosshair</div>
                 </div>
                 <div class="v-fnode v-fnode-4">
                   <div class="v-fnode-dot">
@@ -998,7 +999,7 @@ def login_page(error: str | None = None) -> str:
                     </svg>
                   </div>
                   <div class="v-fnode-label">ZK Proof</div>
-                  <div class="v-fnode-sub">Longfellow · 10s</div>
+                  <div class="v-fnode-sub">Longfellow · ~5s · browser</div>
                 </div>
                 <div class="v-fnode v-fnode-6">
                   <div class="v-fnode-dot">
@@ -1024,16 +1025,17 @@ def login_page(error: str | None = None) -> str:
           <div class="v-reveal">
             <span class="v-eyebrow">Verification, in the open</span>
             <h2 class="v-h2">If the spec doesn't hold, no proof exists.</h2>
-            <p class="v-lede">The issuer runs mypy, pytest, and Z3 against the
-               PR before minting a credential. Failures break the chain. There
+            <p class="v-lede">Your repository's own CI runs mypy, pytest, Z3 and
+               crosshair against the PR; the issuer reads that verdict before
+               minting a credential. Failures break the chain. There
                is no "force-approve."</p>
           </div>
           <div class="v-terminal v-reveal" data-typer>
             <div class="bar">
               <span class="dot red"></span><span class="dot yellow"></span><span class="dot green"></span>
-              <span class="title">issuer.spec_check · PR #11</span>
+              <span class="title">veridict-spec-gate · PR #11</span>
             </div>
-            <pre class="live"><span class="line"><span class="cmd">$ veridict verify pull/11</span></span><span class="line"><span class="dim">→ fetching files@a8c4f2…</span></span><span class="line"><span class="ok">✓ mypy</span>      <span class="dim">0 errors</span></span><span class="line"><span class="ok">✓ pytest</span>    <span class="dim">14 passed in 0.34s</span></span><span class="line"><span class="ok">✓ z3</span>        <span class="dim">all invariants UNSAT for negation</span></span><span class="line"> </span><span class="line"><span class="ok">credential issued</span> <span class="dim">→ valid 10m</span></span><span class="line"><span class="dim">bound to a8c4f2 · role=maintainer</span><span class="v-cursor"></span></span></pre>
+            <pre class="live"><span class="line"><span class="cmd">$ veridict verify pull/11</span></span><span class="line"><span class="dim">→ fetching files@a8c4f2…</span></span><span class="line"><span class="ok">✓ mypy</span>      <span class="dim">0 errors</span></span><span class="line"><span class="ok">✓ pytest</span>    <span class="dim">14 passed in 0.34s</span></span><span class="line"><span class="ok">✓ z3</span>        <span class="dim">all invariants UNSAT for negation</span></span><span class="line"><span class="ok">✓ crosshair</span> <span class="dim">contracts hold, no counterexample</span></span><span class="line"> </span><span class="line"><span class="ok">credential issued</span> <span class="dim">→ valid 10m</span></span><span class="line"><span class="dim">bound to a8c4f2 · role=maintainer</span><span class="v-cursor"></span></span></pre>
           </div>
         </div>
       </section>
@@ -1045,8 +1047,8 @@ def login_page(error: str | None = None) -> str:
             <h4>ZK Proof Receipt <span class="badge-ok">verified</span></h4>
             <div class="row"><span class="k">circuit_id</span><span class="v">3f8c…0192</span></div>
             <div class="row"><span class="k">size</span><span class="v">361,408 bytes</span></div>
-            <div class="row"><span class="k">prover</span><span class="v">10.4 s</span></div>
-            <div class="row"><span class="k">verifier</span><span class="v">7.1 s</span></div>
+            <div class="row"><span class="k">prover</span><span class="v">5.8 s (browser)</span></div>
+            <div class="row"><span class="k">verifier</span><span class="v">2.5 s (wasmtime)</span></div>
             <div class="row"><span class="k">transcript</span><span class="v">8217d4…ae5b</span></div>
             <div class="row"><span class="k">pseudonym</span><span class="v">@reviewer-a7c2f3</span></div>
             <div class="row"><span class="k">identity</span><span class="v">never disclosed</span></div>
@@ -1123,15 +1125,16 @@ def login_page(error: str | None = None) -> str:
                  ID inside the ZK circuit.</p>
             </div>
             <div class="v-limit">
-              <div class="label">Key custody</div>
-              <h4>Issuer mints the device key.</h4>
-              <p>For demo speed. A real deployment would generate the device
-                 key in the browser so the issuer never sees it.</p>
+              <div class="label">Verification depth</div>
+              <h4>Contracts, not proofs.</h4>
+              <p>crosshair symbolically executes each function against its
+                 pre/post contracts and reports counterexamples. Bounded, not
+                 exhaustive. A Dafny or Lean refinement check would be stronger.</p>
             </div>
             <div class="v-limit">
               <div class="label">Spec coverage</div>
               <h4>Python only, for now.</h4>
-              <p>mypy + pytest + Z3 only run on <code>.py</code> files. Non-Python
+              <p>mypy + pytest + Z3 + crosshair only run on <code>.py</code> files. Non-Python
                  PRs pass through unverified. Dafny, Rust, Lean are obvious
                  next stops.</p>
             </div>
@@ -1226,8 +1229,8 @@ def dashboard_page(login: str, role: str, org: str, message: str | None = None,
         <div class="card" style="margin-top:1rem; border-style: dashed;">
           <h3 style="margin-top:0; font-size:1rem;">Synthesize AI code</h3>
           <p class="meta" style="margin:0 0 0.85rem">Describe what to build. Claude generates the code
-             and tests, creates a GitHub PR, and runs mypy + pytest automatically
-             before you can approve.</p>
+             and tests, creates a GitHub PR, and your repo's CI runs mypy, pytest, Z3
+             and crosshair before you can approve.</p>
           <a class="btn secondary" href="/synthesize">Synthesize with AI &rarr;</a>
         </div>
     """, user=login)
@@ -1259,7 +1262,7 @@ def _file_status_badge(status: str) -> str:
 
 
 def _spec_check_banner(result: dict) -> str:
-    """Green/red banner showing mypy + pytest result. Empty string if skipped."""
+    """Green/red banner showing the mypy + pytest + Z3 + crosshair result. Empty string if skipped."""
     if result.get("skipped"):
         return ""
     if result.get("passed"):
@@ -1272,6 +1275,8 @@ def _spec_check_banner(result: dict) -> str:
             chips.append("no tests")
         if result.get("has_z3") and result.get("z3_ok"):
             chips.append("z3 ✓")
+        if result.get("has_contracts") and result.get("crosshair_ok"):
+            chips.append("crosshair ✓")
         n = result.get("files_checked", 0)
         chip_str = " &nbsp;·&nbsp; ".join(chips)
         return (
@@ -1764,7 +1769,7 @@ def synthesize_page(login: str, error: str | None = None) -> str:
         <h1>Synthesize AI code</h1>
         <p class="subtitle">
           Describe what to build. Claude generates the implementation + tests,
-          creates a GitHub PR, and verifies it with mypy + pytest before you can approve.
+          creates a GitHub PR, and your repo's CI verifies it with mypy, pytest, Z3 and crosshair before you can approve.
         </p>
         {err}
         <div class="card">
@@ -1799,7 +1804,7 @@ def synthesize_page(login: str, error: str | None = None) -> str:
         <ol class="howitworks">
           <li><span class="step">1</span><span><strong>Claude synthesizes</strong> the implementation and pytest tests from your spec (~5s).</span></li>
           <li><span class="step">2</span><span><strong>A GitHub PR is created</strong> automatically with the generated code.</span></li>
-          <li><span class="step">3</span><span><strong>mypy + pytest run</strong> during review — approval is blocked if either fails.</span></li>
+          <li><span class="step">3</span><span><strong>mypy, pytest, Z3 and crosshair run</strong> in CI — approval is blocked if any fails.</span></li>
           <li><span class="step">4</span><span><strong>ZK-verified reviewers</strong> approve anonymously; the merge gate turns green once enough approve.</span></li>
         </ol>
 

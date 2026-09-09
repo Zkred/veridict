@@ -266,7 +266,7 @@ async def create_github_pr(
             "## AI-Synthesized Code\n\n"
             f"Generated from specification:\n\n> {spec_summary[:400]}\n\n"
             "### Verification chain\n\n"
-            "1. **Spec check** — mypy + pytest run automatically during review\n"
+            "1. **Spec gate** — mypy, pytest, Z3 and crosshair run in this repository's CI; no reviewer credential is issued unless all pass\n"
             "2. **ZK proof** — only org-credentialed reviewers can approve; identity not disclosed\n"
             "3. **Merge gate** — branch protection requires N anonymous approvals\n\n"
             "*This PR was synthesized by an AI and must pass formal spec checks before merge.*"
